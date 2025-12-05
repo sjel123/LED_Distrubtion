@@ -10,10 +10,12 @@ Pixel-only LED simulation server for WLED 16x64 matrix.
          Random Walk, Game of Life
 - Pixel build: one-pixel-at-a-time effect
 - Auto-reset after N changed pixels (with pause and clear)
-- Flask UI for controlling mode, params, and rotation
+- Color palettes / themes
+- Idle animations when simulations are paused
 
 Run:
-    python3 led_sim_pixel_flask.py
+    python3 led_sim_pixel_flask.py [--config config.json] [--palette fire] [--idle-mode rainbow]
+
 Then open:
     http://localhost:5000
 """
@@ -23,6 +25,9 @@ import random
 import time
 import threading
 import requests
+import argparse
+import json
+import os
 
 from flask import Flask, request, render_template_string, jsonify
 
@@ -54,6 +59,14 @@ config = {
     # Rotation angle in degrees: 0, 90, 180, or 270
     "rotation": 0,
 
+    # Color palette / theme
+    # "fire", "plasma", "viridis", "turbo", "neon"
+    "palette": "fire",
+
+    # Idle animation when running == False
+    # "off", "rainbow", "noise", "matrix", "galaxy", "sparkle"
+    "idle_mode": "rainbow",
+
     "running": True,
 }
 
@@ -61,6 +74,117 @@ status = {
     "stats": "n=0",
     "last_error": "",
 }
+
+# ===== COLOR / PALETTE HELPERS =====
+
+def clamp01(t: float) -> float:
+    return max(0.0, min(1.0, t))
+
+
+def lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def lerp_color(c1, c2, t: float):
+    t = clamp01(t)
+    return (
+        int(lerp(c1[0], c2[0], t)),
+        int(lerp(c1[1], c2[1], t)),
+        int(lerp(c1[2], c2[2], t)),
+    )
+
+
+def rgb_to_hex(c):
+    r, g, b = c
+    return f"{r:02x}{g:02x}{b:02x}"
+
+
+def gradient_color(stops, t: float):
+    """
+    Given a list of RGB stops and t in [0,1], interpolate along the gradient.
+    """
+    t = clamp01(t)
+    n = len(stops)
+    if n == 0:
+        return (255, 255, 255)
+    if n == 1:
+        return stops[0]
+    pos = t * (n - 1)
+    i = int(math.floor(pos))
+    f = pos - i
+    if i >= n - 1:
+        return stops[-1]
+    return lerp_color(stops[i], stops[i + 1], f)
+
+
+# Palette definitions
+FIRE_STOPS = [
+    (0,   0,   0),
+    (120, 0,   0),
+    (255, 64,  0),
+    (255, 160, 0),
+    (255, 255, 255),
+]
+
+PLASMA_STOPS = [
+    (20,  0,  70),
+    (0,  40, 255),
+    (0, 255, 200),
+    (255, 255, 0),
+    (255, 0, 130),
+]
+
+VIRIDIS_STOPS = [
+    (68,   1,  84),
+    (59,  82, 139),
+    (33, 145, 140),
+    (94, 201,  97),
+    (253, 231, 37),
+]
+
+TURBO_STOPS = [
+    (34,   9, 135),
+    (68,  58, 171),
+    (29, 118, 188),
+    (50, 181, 110),
+    (248, 231,  28),
+    (245, 126,  21),
+    (179,   4,  23),
+]
+
+NEON_STOPS = [
+    (0, 255, 255),
+    (255, 0, 255),
+    (0, 255, 0),
+    (255, 255, 0),
+    (255, 0, 128),
+]
+
+
+def palette_color(t: float, palette_name: str) -> str:
+    """
+    Map a scalar t in [0,1] to a hex color using the configured palette.
+    """
+    t = clamp01(t)
+    p = (palette_name or "").lower()
+    if p == "fire":
+        c = gradient_color(FIRE_STOPS, t)
+    elif p == "plasma":
+        c = gradient_color(PLASMA_STOPS, t)
+    elif p == "viridis":
+        c = gradient_color(VIRIDIS_STOPS, t)
+    elif p == "turbo":
+        c = gradient_color(TURBO_STOPS, t)
+    elif p == "neon":
+        c = gradient_color(NEON_STOPS, t)
+    else:
+        # fallback: blue → cyan → yellow
+        c = gradient_color(
+            [(0, 0, 128), (0, 255, 255), (255, 255, 0)],
+            t,
+        )
+    return rgb_to_hex(c)
+
 
 # ===== HTTP / LED HELPERS =====
 
@@ -122,7 +246,6 @@ def logical_to_index(lx: int, ly: int) -> int:
     with config_lock:
         rotation = config.get("rotation", 0)
 
-    # Determine logical grid size for clamping
     if rotation in (0, 180):
         W_log, H_log = PHYS_WIDTH, PHYS_HEIGHT
     else:
@@ -137,11 +260,9 @@ def logical_to_index(lx: int, ly: int) -> int:
         px = PHYS_WIDTH - 1 - lx
         py = PHYS_HEIGHT - 1 - ly
     elif rotation == 90:
-        # CCW: (x, y) -> (y, H_phys-1-x) with W_log=16, H_log=64
         px = ly
         py = PHYS_HEIGHT - 1 - lx
     else:  # 270
-        # CW: (x, y) -> (W_phys-1-y, x)
         px = PHYS_WIDTH - 1 - ly
         py = lx
 
@@ -200,7 +321,6 @@ class MonteCarloPi:
     def sample_pixel_step(self):
         """
         Perform one Monte Carlo sample and return (idx, hex_color) for the pixel to color.
-        Returns None if nothing to draw (rare for this mode).
         """
         x = random.uniform(-1.0, 1.0)
         y = random.uniform(-1.0, 1.0)
@@ -230,16 +350,15 @@ class MonteCarloPi:
             self.max_count = 1
 
         density = tot / self.max_count
-        brightness = int(50 + 205 * density)
-        brightness = max(0, min(255, brightness))
-
         inside_frac = ins / tot if tot > 0 else 0.0
-        r = int(brightness * (1.0 - inside_frac))   # red = outside
-        g = int(brightness * inside_frac)           # green = inside
-        b = 0
-        hex_color = f"{r:02x}{g:02x}{b:02x}"
 
-        # Domain is at logical top-left
+        # Mix density + inside-ness into palette coordinate
+        t = clamp01(0.4 * density + 0.6 * inside_frac)
+
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
         idx = logical_to_index(px, py)
         return idx, hex_color
 
@@ -259,12 +378,12 @@ class NormalHistogram:
 
         self.x_min = mu - 3 * sigma
         self.x_max = mu + 3 * sigma
-        self.bins = self.W                    # full logical width
+        self.bins = self.W
         self.counts = [0] * self.bins
         self.sample_count = 0
         self.sum_x = 0.0
         self.sum_x2 = 0.0
-        self.next_y = [self.H - 1] * self.bins  # stacking from bottom
+        self.next_y = [self.H - 1] * self.bins
 
     def reset(self):
         self.counts = [0] * self.bins
@@ -274,10 +393,6 @@ class NormalHistogram:
         self.next_y = [self.H - 1] * self.bins
 
     def sample_pixel_step(self):
-        """
-        Sample from N(mu, sigma) and place a pixel in the histogram, returning (idx, hex_color)
-        or None if the sample is out of visual range.
-        """
         if self.W <= 0 or self.H <= 0:
             return None
 
@@ -298,12 +413,18 @@ class NormalHistogram:
 
         y = self.next_y[bin_idx]
         if y < 0:
-            y = 0  # clamp
+            y = 0
         else:
             self.next_y[bin_idx] -= 1
 
+        # Use bin position as palette coordinate
+        t = bin_idx / max(1, self.bins - 1)
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
         idx = logical_to_index(bin_idx, y)
-        return idx, "00aaff"  # cyan-ish
+        return idx, hex_color
 
     def stats_str(self):
         if self.sample_count == 0:
@@ -324,7 +445,6 @@ class PoissonHistogram:
         self.W = log_width
         self.H = log_height
 
-        # Decide a max k to visualize (covers most of the Poisson mass)
         if lam > 0:
             approx_max = lam + 6 * math.sqrt(lam)
         else:
@@ -344,7 +464,6 @@ class PoissonHistogram:
         self.next_y = [self.H - 1] * self.bins
 
     def _sample_poisson(self) -> int:
-        """Knuth-style Poisson sampler."""
         L = math.exp(-self.lam)
         k = 0
         p = 1.0
@@ -354,31 +473,22 @@ class PoissonHistogram:
         return k - 1
 
     def _k_to_bin(self, k: int):
-        """
-        Map k (0..∞) into a bin index 0..W-1.
-        Values above k_max are clamped to k_max.
-        """
         if self.bins <= 0 or self.k_max <= 0:
             return None
         if k < 0:
             return None
         kk = min(k, self.k_max)
-        u = kk / self.k_max           # 0..1
+        u = kk / self.k_max
         bin_idx = int(u * (self.bins - 1))
         if 0 <= bin_idx < self.bins:
             return bin_idx
         return None
 
     def sample_pixel_step(self):
-        """
-        Sample from Poisson(λ), map k to full-width histogram,
-        and return a single pixel update (idx, hex_color).
-        """
         if self.W <= 0 or self.H <= 0:
             return None
 
         k = self._sample_poisson()
-
         self.sample_count += 1
         self.sum_k += k
 
@@ -394,8 +504,13 @@ class PoissonHistogram:
         else:
             self.next_y[bin_idx] -= 1
 
+        t = bin_idx / max(1, self.bins - 1)
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
         idx = logical_to_index(bin_idx, y)
-        return idx, "ffaa00"  # yellow/orange bar
+        return idx, hex_color
 
     def stats_str(self):
         if self.sample_count == 0:
@@ -407,9 +522,6 @@ class PoissonHistogram:
 class RandomWalkSim:
     """
     Single-pixel random walk with trails in logical W x H.
-
-    Each step moves the walker one pixel in a random cardinal direction.
-    Trails are left behind; everything is cleared only on reset.
     """
     def __init__(self, log_width: int, log_height: int):
         self.W = log_width
@@ -432,8 +544,13 @@ class RandomWalkSim:
         self.y = (self.y + dy) % self.H
         self.steps += 1
 
+        # Use time / steps as palette coordinate
+        t = (self.steps % 1000) / 1000.0
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
         idx = logical_to_index(self.x, self.y)
-        hex_color = "ff00ff"  # magenta-ish walker
         return idx, hex_color
 
     def stats_str(self):
@@ -443,9 +560,6 @@ class RandomWalkSim:
 class GameOfLifeSim:
     """
     Conway's Game of Life on a logical W x H grid.
-
-    Internally updates full generations, but exposes changes one pixel at a time
-    via sample_pixel_step() by keeping a queue of pending updates.
     """
     def __init__(self, log_width: int, log_height: int, alive_prob: float = 0.3):
         self.W = log_width
@@ -464,7 +578,6 @@ class GameOfLifeSim:
         self.prev_grid = [[False for _ in range(self.W)] for _ in range(self.H)]
         self.update_queue = []
         self.generation = 0
-        # Initial updates: all alive cells
         for y in range(self.H):
             for x in range(self.W):
                 if self.grid[y][x] != self.prev_grid[y][x]:
@@ -496,7 +609,6 @@ class GameOfLifeSim:
                     new_grid[y][x] = (neighbors == 2 or neighbors == 3)
                 else:
                     new_grid[y][x] = (neighbors == 3)
-        # Build update_queue as difference
         self.update_queue = []
         for y in range(self.H):
             for x in range(self.W):
@@ -505,8 +617,6 @@ class GameOfLifeSim:
         self.grid = new_grid
         self._sync_prev()
         self.generation += 1
-
-        # If no changes (stable or oscillator), reseed randomly
         if not self.update_queue:
             self._random_seed()
 
@@ -518,12 +628,206 @@ class GameOfLifeSim:
         if not self.update_queue:
             return None
         x, y, alive = self.update_queue.pop()
+
+        if alive:
+            t = (self.generation % 256) / 255.0
+            with config_lock:
+                pal = config.get("palette", "fire")
+            hex_color = palette_color(t, pal)
+        else:
+            hex_color = "000000"
+
         idx = logical_to_index(x, y)
-        hex_color = "00ff00" if alive else "000000"
         return idx, hex_color
 
     def stats_str(self):
         return f"Game of Life: gen={self.generation:6d}"
+
+
+# ===== IDLE ANIMATION CLASSES =====
+
+class IdleBase:
+    def __init__(self, log_width: int, log_height: int):
+        self.W = log_width
+        self.H = log_height
+
+
+class IdleRainbow(IdleBase):
+    def __init__(self, log_width: int, log_height: int):
+        super().__init__(log_width, log_height)
+        self.index = 0
+        self.phase = 0.0
+
+    def reset(self):
+        self.index = 0
+        self.phase = 0.0
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+        lx = self.index % self.W
+        ly = (self.index // self.W) % self.H
+        self.index = (self.index + 1) % (self.W * self.H)
+
+        # Simple HSV rainbow over x + time
+        pos = (lx / max(1, self.W - 1) + self.phase) % 1.0
+        self.phase = (self.phase + 0.0005) % 1.0
+
+        # Convert HSV to RGB-ish via sine waves
+        r = int(127 * (math.sin(2 * math.pi * pos) + 1))
+        g = int(127 * (math.sin(2 * math.pi * (pos + 1/3)) + 1))
+        b = int(127 * (math.sin(2 * math.pi * (pos + 2/3)) + 1))
+        hex_color = rgb_to_hex((r, g, b))
+
+        idx = logical_to_index(lx, ly)
+        return idx, hex_color
+
+
+class IdleNoise(IdleBase):
+    def __init__(self, log_width: int, log_height: int):
+        super().__init__(log_width, log_height)
+        self.index = 0
+        self.z = random.random()
+
+    def reset(self):
+        self.index = 0
+        self.z = random.random()
+
+    def _noise(self, x, y, z):
+        # Simple hash-based pseudo-noise
+        return (math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453) % 1.0
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+        lx = self.index % self.W
+        ly = (self.index // self.W) % self.H
+        self.index = (self.index + 1) % (self.W * self.H)
+
+        self.z += 0.01
+        v = self._noise(lx, ly, self.z)
+        t = clamp01(v)
+
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
+        idx = logical_to_index(lx, ly)
+        return idx, hex_color
+
+
+class IdleMatrixRain(IdleBase):
+    def __init__(self, log_width: int, log_height: int):
+        super().__init__(log_width, log_height)
+        self.heads = [random.randint(-self.H, self.H) for _ in range(self.W)]
+
+    def reset(self):
+        self.heads = [random.randint(-self.H, self.H) for _ in range(self.W)]
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+        # Pick a random column to update
+        x = random.randint(0, self.W - 1)
+        head = self.heads[x]
+
+        # Clear a pixel behind the head
+        tail_y = head - 4
+        if 0 <= tail_y < self.H:
+            idx_tail = logical_to_index(x, tail_y)
+            tail_color = "000000"
+            # return tail clear this time
+            self.heads[x] = head + 1
+            return idx_tail, tail_color
+
+        # Draw head
+        y = head % (self.H + 10)
+        if y >= self.H:
+            # off-screen; advance and keep going
+            self.heads[x] = head + 1
+            return None
+
+        # Use palette with green-ish bias by forcing t near middle
+        t = clamp01(0.4 + 0.2 * random.random())
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
+        idx = logical_to_index(x, y)
+        self.heads[x] = head + 1
+
+        # Occasionally respawn at top
+        if self.heads[x] > self.H + 10 and random.random() < 0.3:
+            self.heads[x] = random.randint(-self.H, 0)
+
+        return idx, hex_color
+
+
+class IdleGalaxy(IdleBase):
+    def __init__(self, log_width: int, log_height: int):
+        super().__init__(log_width, log_height)
+        self.stars = []
+        for _ in range((self.W * self.H) // 16):
+            self.stars.append({
+                "x": random.randint(0, self.W - 1),
+                "y": random.randint(0, self.H - 1),
+                "phase": random.random(),
+                "speed": 0.01 + 0.03 * random.random(),
+            })
+
+    def reset(self):
+        self.__init__(self.W, self.H)
+
+    def sample_pixel_step(self):
+        if not self.stars:
+            return None
+        s = random.choice(self.stars)
+        s["phase"] = (s["phase"] + s["speed"]) % 1.0
+        brightness = 0.2 + 0.8 * (0.5 * (1 + math.sin(2 * math.pi * s["phase"])))
+        t = clamp01(brightness)
+
+        with config_lock:
+            pal = config.get("palette", "fire")
+        hex_color = palette_color(t, pal)
+
+        idx = logical_to_index(s["x"], s["y"])
+        return idx, hex_color
+
+
+class IdleSparkle(IdleBase):
+    def __init__(self, log_width: int, log_height: int):
+        super().__init__(log_width, log_height)
+
+    def reset(self):
+        pass
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+        lx = random.randint(0, self.W - 1)
+        ly = random.randint(0, self.H - 1)
+        t = random.random()
+        with config_lock:
+            pal = config.get("palette", "neon")
+        hex_color = palette_color(t, pal)
+        idx = logical_to_index(lx, ly)
+        return idx, hex_color
+
+
+def create_idle_sim(mode: str, log_width: int, log_height: int):
+    m = (mode or "").lower()
+    if m == "rainbow":
+        return IdleRainbow(log_width, log_height)
+    elif m == "noise":
+        return IdleNoise(log_width, log_height)
+    elif m == "matrix":
+        return IdleMatrixRain(log_width, log_height)
+    elif m == "galaxy":
+        return IdleGalaxy(log_width, log_height)
+    elif m == "sparkle":
+        return IdleSparkle(log_width, log_height)
+    else:
+        return None  # "off" or unknown
 
 
 # ===== SIMULATION LOOP (PIXEL-ONLY) =====
@@ -548,12 +852,15 @@ def simulation_loop():
     else:  # "life"
         sim = GameOfLifeSim(log_width=log_W, log_height=log_H)
 
+    idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
+
     last_mode   = cfg["mode"]
     last_domain = cfg["pi_domain"]
     last_mu     = cfg["mu"]
     last_sigma  = cfg["sigma"]
     last_lam    = cfg["lam"]
     last_rot    = cfg["rotation"]
+    last_idle   = cfg.get("idle_mode", "rainbow")
 
     last_colors = ["000000"] * NLED
     changed_pixels_total = 0
@@ -564,18 +871,14 @@ def simulation_loop():
         with config_lock:
             cfg = dict(config)
 
-        if not cfg["running"]:
-            time.sleep(0.1)
-            continue
-
         log_W, log_H = get_logical_dims(cfg["rotation"])
 
-        # Rebuild sim if mode, key params, or rotation changed
         mode_changed   = (cfg["mode"] != last_mode)
         pi_changed     = (cfg["mode"] == "pi"      and cfg["pi_domain"] != last_domain)
         norm_changed   = (cfg["mode"] == "normal"  and (cfg["mu"] != last_mu or cfg["sigma"] != last_sigma))
         pois_changed   = (cfg["mode"] == "poisson" and cfg["lam"] != last_lam)
         rot_changed    = (cfg["rotation"] != last_rot)
+        idle_changed   = (cfg.get("idle_mode", "rainbow") != last_idle)
 
         if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed:
             if cfg["mode"] == "pi":
@@ -586,7 +889,7 @@ def simulation_loop():
                 sim = PoissonHistogram(lam=cfg["lam"], log_width=log_W, log_height=log_H)
             elif cfg["mode"] == "random_walk":
                 sim = RandomWalkSim(log_width=log_W, log_height=log_H)
-            else:  # "life"
+            else:
                 sim = GameOfLifeSim(log_width=log_W, log_height=log_H)
 
             last_mode   = cfg["mode"]
@@ -600,19 +903,33 @@ def simulation_loop():
             changed_pixels_total = 0
             clear_matrix()
 
+        if idle_changed or rot_changed:
+            idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
+            last_idle = cfg.get("idle_mode", "rainbow")
+
         dt = 1.0 / max(1, cfg["fps"])
         start = time.time()
 
-        # --- PIXEL BUILD STEP ---
         changed_this_frame = {}
-        for _ in range(cfg["points_per_frame"]):
-            res = sim.sample_pixel_step()
-            if res is None:
-                continue
-            idx, hex_color = res
-            changed_this_frame[idx] = hex_color
 
-        # Build patch of only *actual* color changes
+        if cfg["running"]:
+            # Main simulation
+            for _ in range(cfg["points_per_frame"]):
+                res = sim.sample_pixel_step()
+                if res is None:
+                    continue
+                idx, hex_color = res
+                changed_this_frame[idx] = hex_color
+        else:
+            # Idle animation
+            if idle_sim is not None:
+                for _ in range(cfg["points_per_frame"]):
+                    res = idle_sim.sample_pixel_step()
+                    if res is None:
+                        continue
+                    idx, hex_color = res
+                    changed_this_frame[idx] = hex_color
+
         if changed_this_frame:
             patch = []
             for idx, hex_color in changed_this_frame.items():
@@ -620,12 +937,13 @@ def simulation_loop():
                     continue
                 last_colors[idx] = hex_color
                 patch.extend([idx, 1, hex_color])
-                changed_pixels_total += 1
+                if cfg["running"]:
+                    changed_pixels_total += 1
             if patch:
                 send_frame_batched(patch)
 
-        # Auto-reset after N changed pixels
-        if changed_pixels_total >= cfg["pixel_reset_after"]:
+        # Auto-reset only for main simulation
+        if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
             with config_lock:
                 status["last_error"] = ""
             time.sleep(cfg["pixel_pause"])
@@ -633,12 +951,16 @@ def simulation_loop():
             last_colors = ["000000"] * NLED
             changed_pixels_total = 0
             sim.reset()
+            if idle_sim is not None:
+                idle_sim.reset()
 
         # Update stats string
         with config_lock:
-            status["stats"] = sim.stats_str()
+            if cfg["running"]:
+                status["stats"] = sim.stats_str()
+            else:
+                status["stats"] = f"idle: {cfg.get('idle_mode', 'off')}"
 
-        # Maintain FPS
         elapsed = time.time() - start
         sleep_time = dt - elapsed
         if sleep_time > 0:
@@ -659,7 +981,7 @@ INDEX_HTML = """
     label { display:block; margin-top:8px; }
     input, select { margin-top:4px; padding:4px; }
     .row { display:flex; gap:20px; flex-wrap:wrap; }
-    .card { border:1px solid #444; padding:12px; border-radius:6px; background:#222; min-width:220px; }
+    .card { border:1px solid #444; padding:12px; border-radius:6px; background:#222; min-width:240px; }
     button { padding:6px 12px; margin-top:10px; }
     .status { margin-top:15px; font-family:monospace; }
   </style>
@@ -682,7 +1004,7 @@ INDEX_HTML = """
         <label>Running:
           <select name="running">
             <option value="true"  {% if cfg.running %}selected{% endif %}>Yes</option>
-            <option value="false" {% if not cfg.running %}selected{% endif %}>No (pause)</option>
+            <option value="false" {% if not cfg.running %}selected{% endif %}>No (show idle)</option>
           </select>
         </label>
         <label>Rotation:
@@ -722,6 +1044,29 @@ INDEX_HTML = """
       </div>
 
       <div class="card">
+        <h3>Colors & Idle</h3>
+        <label>Palette:
+          <select name="palette">
+            <option value="fire"    {% if cfg.palette == 'fire' %}selected{% endif %}>Fire</option>
+            <option value="plasma"  {% if cfg.palette == 'plasma' %}selected{% endif %}>Plasma</option>
+            <option value="viridis" {% if cfg.palette == 'viridis' %}selected{% endif %}>Viridis</option>
+            <option value="turbo"   {% if cfg.palette == 'turbo' %}selected{% endif %}>Turbo</option>
+            <option value="neon"    {% if cfg.palette == 'neon' %}selected{% endif %}>Neon</option>
+          </select>
+        </label>
+        <label>Idle animation (when paused):
+          <select name="idle_mode">
+            <option value="off"     {% if cfg.idle_mode == 'off' %}selected{% endif %}>Off</option>
+            <option value="rainbow" {% if cfg.idle_mode == 'rainbow' %}selected{% endif %}>Rainbow swirl</option>
+            <option value="noise"   {% if cfg.idle_mode == 'noise' %}selected{% endif %}>Noise field</option>
+            <option value="matrix"  {% if cfg.idle_mode == 'matrix' %}selected{% endif %}>Matrix rain</option>
+            <option value="galaxy"  {% if cfg.idle_mode == 'galaxy' %}selected{% endif %}>Galaxy starfield</option>
+            <option value="sparkle" {% if cfg.idle_mode == 'sparkle' %}selected{% endif %}>Sparkle</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="card">
         <h3>Pixel Build Behavior</h3>
         <label>Reset after (changed pixels):
           <input type="number" name="pixel_reset_after" value="{{ cfg.pixel_reset_after }}" min="1" />
@@ -743,7 +1088,7 @@ INDEX_HTML = """
 
   <p style="margin-top:10px; font-size:0.9em; color:#888;">
     Pixel-only mode: one-pixel-at-a-time build, low network load.<br>
-    Rotation changes the logical grid between 64×16 and 16×64 and maps it onto the fixed 64×16 panel.
+    Rotation switches logical 64×16 / 16×64; palette and idle mode control the art when paused.
   </p>
 </body>
 </html>
@@ -774,6 +1119,10 @@ def index():
 
             config["running"] = request.form.get("running", "true") == "true"
 
+            # Palette & idle mode from UI
+            config["palette"] = request.form.get("palette", config["palette"])
+            config["idle_mode"] = request.form.get("idle_mode", config.get("idle_mode", "rainbow"))
+
             # Rotation: sanitize into {0, 90, 180, 270}
             rot_str = request.form.get("rotation", str(config["rotation"]))
             try:
@@ -801,8 +1150,38 @@ def api_status():
         })
 
 
+# ===== CLI / JSON CONFIG LOADING =====
+
+def apply_external_config():
+    parser = argparse.ArgumentParser(description="LED matrix Monte Carlo & art server")
+    parser.add_argument("--config", help="Path to JSON config file", default=None)
+    parser.add_argument("--palette", help="Palette override",
+                        choices=["fire", "plasma", "viridis", "turbo", "neon"])
+    parser.add_argument("--idle-mode", help="Idle mode override",
+                        choices=["off", "rainbow", "noise", "matrix", "galaxy", "sparkle"])
+    args = parser.parse_args()
+
+    if args.config and os.path.exists(args.config):
+        try:
+            with open(args.config, "r") as f:
+                data = json.load(f)
+            with config_lock:
+                for k, v in data.items():
+                    if k in config:
+                        config[k] = v
+        except Exception as e:
+            print(f"Error loading config JSON: {e}")
+
+    with config_lock:
+        if args.palette:
+            config["palette"] = args.palette
+        if args.idle_mode:
+            config["idle_mode"] = args.idle_mode
+
+
 if __name__ == "__main__":
-    # Start simulation in background thread
+    apply_external_config()
+
     t = threading.Thread(target=simulation_loop, daemon=True)
     t.start()
 
