@@ -66,6 +66,13 @@ config = {
     # When palette == "single", use this hex color (rrggbb)
     "single_color": "ffffff",
 
+    # NEW: how to interpret t for colors
+    # "data"   = use t from simulation/idle (current behavior)
+    # "random" = random color per pixel
+    # "grad_x" = gradient left→right (logical x)
+    # "grad_y" = gradient top→bottom (logical y)
+    "color_pattern": "data",
+
     # Idle animation when running == False
     # "off", "rainbow", "noise", "matrix", "galaxy", "sparkle"
     "idle_mode": "rainbow",
@@ -201,6 +208,38 @@ def palette_color(t: float, palette_name: str, single_color: str | None = None) 
         )
     return rgb_to_hex(c)
 
+def apply_color_pattern(t_base: float, lx: int, ly: int) -> str:
+    """
+    Central helper: given a base t (0..1) and logical coords (lx, ly),
+    apply the configured color_pattern + palette to get a hex color.
+    """
+    with config_lock:
+        palette_name   = config.get("palette", "fire")
+        single_color   = config.get("single_color", "ffffff")
+        color_pattern  = config.get("color_pattern", "data")
+        rotation       = config.get("rotation", 0)
+
+    # Determine logical dims for gradients
+    log_W, log_H = get_logical_dims(rotation)
+
+    pattern = (color_pattern or "data").lower()
+
+    if pattern == "random":
+        t = random.random()
+    elif pattern == "grad_x":
+        if log_W <= 1:
+            t = t_base
+        else:
+            t = lx / (log_W - 1)
+    elif pattern == "grad_y":
+        if log_H <= 1:
+            t = t_base
+        else:
+            t = ly / (log_H - 1)
+    else:  # "data" or unknown
+        t = t_base
+
+    return palette_color(t, palette_name, single_color)
 
 
 # ===== HTTP / LED HELPERS =====
@@ -375,7 +414,7 @@ class MonteCarloPi:
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)   
+        hex_color = apply_color_pattern(t, px, py)   
 
         idx = logical_to_index(px, py)
         return idx, hex_color
@@ -440,7 +479,7 @@ class NormalHistogram:
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, bin_idx, y)
 
         idx = logical_to_index(bin_idx, y)
         return idx, hex_color
@@ -527,7 +566,8 @@ class PoissonHistogram:
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, bin_idx, y)
+
 
         idx = logical_to_index(bin_idx, y)
         return idx, hex_color
@@ -569,7 +609,7 @@ class RandomWalkSim:
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, self.x, self.y)
 
         idx = logical_to_index(self.x, self.y)
         return idx, hex_color
@@ -655,7 +695,7 @@ class GameOfLifeSim:
             with config_lock:
                 pal = config.get("palette", "fire")
                 sc  = config.get("single_color", "ffffff")
-            hex_color = palette_color(t, pal, sc)
+            hex_color = apply_color_pattern(t, x, y)
         else:
             hex_color = "000000"
 
@@ -692,14 +732,12 @@ class IdleRainbow(IdleBase):
         self.index = (self.index + 1) % (self.W * self.H)
 
         # Simple HSV rainbow over x + time
+                # Base swirl coordinate
         pos = (lx / max(1, self.W - 1) + self.phase) % 1.0
         self.phase = (self.phase + 0.0005) % 1.0
 
-        # Convert HSV to RGB-ish via sine waves
-        r = int(127 * (math.sin(2 * math.pi * pos) + 1))
-        g = int(127 * (math.sin(2 * math.pi * (pos + 1/3)) + 1))
-        b = int(127 * (math.sin(2 * math.pi * (pos + 2/3)) + 1))
-        hex_color = rgb_to_hex((r, g, b))
+        t = pos  # 0..1 around the ring
+        hex_color = apply_color_pattern(t, lx, ly)
 
         idx = logical_to_index(lx, ly)
         return idx, hex_color
@@ -733,7 +771,7 @@ class IdleNoise(IdleBase):
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, lx, ly)
 
         idx = logical_to_index(lx, ly)
         return idx, hex_color
@@ -775,7 +813,7 @@ class IdleMatrixRain(IdleBase):
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, x, y)
 
         idx = logical_to_index(x, y)
         self.heads[x] = head + 1
@@ -813,7 +851,7 @@ class IdleGalaxy(IdleBase):
         with config_lock:
             pal = config.get("palette", "fire")
             sc  = config.get("single_color", "ffffff")
-        hex_color = palette_color(t, pal, sc)
+        hex_color = apply_color_pattern(t, s["x"], s["y"])
 
         idx = logical_to_index(s["x"], s["y"])
         return idx, hex_color
@@ -834,7 +872,7 @@ class IdleSparkle(IdleBase):
         t = random.random()
         with config_lock:
             pal = config.get("palette", "neon")
-        hex_color = palette_color(t, pal)
+        hex_color = apply_color_pattern(t, lx, ly)
         idx = logical_to_index(lx, ly)
         return idx, hex_color
 
@@ -1093,6 +1131,14 @@ INDEX_HTML = """
             <option value="sparkle" {% if cfg.idle_mode == 'sparkle' %}selected{% endif %}>Sparkle</option>
           </select>
         </label>
+        <label>Color pattern:
+            <select name="color_pattern">
+                <option value="data"   {% if cfg.color_pattern == 'data' %}selected{% endif %}>Data-driven (default)</option>
+                <option value="random" {% if cfg.color_pattern == 'random' %}selected{% endif %}>Random per pixel</option>
+                <option value="grad_x" {% if cfg.color_pattern == 'grad_x' %}selected{% endif %}>Gradient across X</option>
+                <option value="grad_y" {% if cfg.color_pattern == 'grad_y' %}selected{% endif %}>Gradient across Y</option>
+            </select>
+            </label>
       </div>
 
       <div class="card">
@@ -1151,7 +1197,7 @@ def index():
             # Palette & idle mode from UI
             config["palette"] = request.form.get("palette", config["palette"])
             config["idle_mode"] = request.form.get("idle_mode", config.get("idle_mode", "rainbow"))
-
+            config["color_pattern"] = request.form.get("color_pattern", config.get("color_pattern", "data"))
             # New: single color handling
             single = request.form.get("single_color", "#" + config.get("single_color", "ffffff"))
             single = single.strip()
