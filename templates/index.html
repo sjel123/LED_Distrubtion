@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LED Pixel Sim Control</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #111; color: #eee; }
+    label { display:block; margin-top:8px; }
+    input, select { margin-top:4px; padding:4px; }
+    .row { display:flex; gap:20px; flex-wrap:wrap; }
+    .card { border:1px solid #444; padding:12px; border-radius:6px; background:#222; min-width:260px; }
+    button { padding:6px 12px; margin-top:10px; }
+    .status { margin-top:15px; font-family:monospace; }
+  </style>
+</head>
+<body>
+  <h1>LED Matrix Pixel Simulation</h1>
+  <form method="POST">
+    <div class="row">
+      <div class="card">
+        <h3>Mode & Run</h3>
+        <label>Mode:
+          <select name="mode">
+            <option value="pi"          {% if cfg.mode == 'pi' %}selected{% endif %}>Monte Carlo π</option>
+            <option value="normal"      {% if cfg.mode == 'normal' %}selected{% endif %}>Normal Histogram</option>
+            <option value="poisson"     {% if cfg.mode == 'poisson' %}selected{% endif %}>Poisson Histogram</option>
+            <option value="random_walk" {% if cfg.mode == 'random_walk' %}selected{% endif %}>Random Walk</option>
+            <option value="life"        {% if cfg.mode == 'life' %}selected{% endif %}>Game of Life</option>
+            <option value="heat"        {% if cfg.mode == 'heat' %}selected{% endif %}>Heat Diffusion</option>
+            <option value="stock"       {% if cfg.mode == 'stock' %}selected{% endif %}>Stock GBM</option>
+            <option value="lorenz"      {% if cfg.mode == 'lorenz' %}selected{% endif %}>Lorenz Attractor</option>
+          </select>
+        </label>
+        <label>Running:
+          <select name="running">
+            <option value="true"  {% if cfg.running %}selected{% endif %}>Yes</option>
+            <option value="false" {% if not cfg.running %}selected{% endif %}>No (show idle)</option>
+          </select>
+        </label>
+        <label>Rotation:
+          <select name="rotation">
+            <option value="0"   {% if cfg.rotation == 0 %}selected{% endif %}>0° (64×16)</option>
+            <option value="90"  {% if cfg.rotation == 90 %}selected{% endif %}>90° (16×64)</option>
+            <option value="180" {% if cfg.rotation == 180 %}selected{% endif %}>180° (64×16)</option>
+            <option value="270" {% if cfg.rotation == 270 %}selected{% endif %}>270° (16×64)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="card">
+        <h3>Timing</h3>
+        <label>FPS:
+          <input type="number" name="fps" value="{{ cfg.fps }}" min="1" max="60" />
+        </label>
+        <label>Points per frame (steps/samples):
+          <input type="number" name="points_per_frame" value="{{ cfg.points_per_frame }}" min="1" max="1000" />
+        </label>
+        <label>Reset after (changed pixels):
+          <input type="number" name="pixel_reset_after" value="{{ cfg.pixel_reset_after }}" min="1" />
+        </label>
+        <label>Pause before restart (seconds):
+          <input type="number" step="0.1" name="pixel_pause" value="{{ cfg.pixel_pause }}" min="0" />
+        </label>
+      </div>
+
+      <div class="card">
+        <h3>Distribution Params</h3>
+        <label>π domain (pixels, Monte Carlo π):
+          <input type="number" name="pi_domain" value="{{ cfg.pi_domain }}" min="4" max="32" />
+        </label>
+        <label>Normal μ:
+          <input type="number" step="0.1" name="mu" value="{{ cfg.mu }}" />
+        </label>
+        <label>Normal σ:
+          <input type="number" step="0.1" name="sigma" value="{{ cfg.sigma }}" />
+        </label>
+        <label>Poisson λ:
+          <input type="number" step="0.1" name="lam" value="{{ cfg.lam }}" />
+        </label>
+      </div>
+
+      <div class="card">
+        <h3>Colors & Idle</h3>
+        <label>Palette:
+          <select name="palette">
+            <option value="fire"    {% if cfg.palette == 'fire' %}selected{% endif %}>Fire</option>
+            <option value="plasma"  {% if cfg.palette == 'plasma' %}selected{% endif %}>Plasma</option>
+            <option value="viridis" {% if cfg.palette == 'viridis' %}selected{% endif %}>Viridis</option>
+            <option value="turbo"   {% if cfg.palette == 'turbo' %}selected{% endif %}>Turbo</option>
+            <option value="neon"    {% if cfg.palette == 'neon' %}selected{% endif %}>Neon</option>
+            <option value="single"  {% if cfg.palette == 'single' %}selected{% endif %}>Single color</option>
+          </select>
+        </label>
+        <label>Single color (for "Single" palette):
+          <input type="color" name="single_color" value="#{{ cfg.single_color }}" />
+        </label>
+        <label>Color pattern:
+          <select name="color_pattern">
+            <option value="data"   {% if cfg.color_pattern == 'data' %}selected{% endif %}>Data-driven</option>
+            <option value="random" {% if cfg.color_pattern == 'random' %}selected{% endif %}>Random per pixel</option>
+            <option value="grad_x" {% if cfg.color_pattern == 'grad_x' %}selected{% endif %}>Gradient across X</option>
+            <option value="grad_y" {% if cfg.color_pattern == 'grad_y' %}selected{% endif %}>Gradient across Y</option>
+          </select>
+        </label>
+        <label>Idle animation (when paused):
+          <select name="idle_mode">
+            <option value="off"     {% if cfg.idle_mode == 'off' %}selected{% endif %}>Off</option>
+            <option value="rainbow" {% if cfg.idle_mode == 'rainbow' %}selected{% endif %}>Rainbow swirl</option>
+            <option value="noise"   {% if cfg.idle_mode == 'noise' %}selected{% endif %}>Noise field</option>
+            <option value="matrix"  {% if cfg.idle_mode == 'matrix' %}selected{% endif %}>Matrix rain</option>
+            <option value="galaxy"  {% if cfg.idle_mode == 'galaxy' %}selected{% endif %}>Galaxy starfield</option>
+            <option value="sparkle" {% if cfg.idle_mode == 'sparkle' %}selected{% endif %}>Sparkle</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <button type="submit">Apply</button>
+    <button type="submit" name="action" value="clear">Clear Matrix</button>
+  </form>
+
+  <div class="status">
+    <div><strong>Stats:</strong> {{ stats }}</div>
+    <div><strong>Last error:</strong> {{ last_error or '(none)' }}</div>
+  </div>
+
+  <p style="margin-top:10px; font-size:0.9em; color:#888;">
+    Pixel-only mode: one-pixel-at-a-time build, low network load.<br>
+    Rotation switches logical 64×16 / 16×64; palettes, color patterns, and idle modes control the art.
+  </p>
+</body>
+</html>

@@ -39,8 +39,9 @@ import requests
 import argparse
 import json
 import os
+import sys
 
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template, jsonify
 
 # ===== PHYSICAL WLED MATRIX SETTINGS =====
 PHYS_WIDTH  = 64
@@ -1142,254 +1143,163 @@ def create_sim(cfg, log_W, log_H):
 
 def simulation_loop():
     global status
+    print("simulation_loop: starting background loop", flush=True)
 
-    with config_lock:
-        cfg = dict(config)
-
-    log_W, log_H = get_logical_dims(cfg["rotation"])
-
-    sim = create_sim(cfg, log_W, log_H)
-    idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
-
-    last_mode   = cfg["mode"]
-    last_domain = cfg["pi_domain"]
-    last_mu     = cfg["mu"]
-    last_sigma  = cfg["sigma"]
-    last_lam    = cfg["lam"]
-    last_rot    = cfg["rotation"]
-    last_idle   = cfg.get("idle_mode", "rainbow")
-
-    last_colors = ["000000"] * NLED
-    changed_pixels_total = 0
-
-    clear_matrix()
-
-    while True:
+    try:
         with config_lock:
             cfg = dict(config)
 
         log_W, log_H = get_logical_dims(cfg["rotation"])
 
-        mode_changed   = (cfg["mode"] != last_mode)
-        pi_changed     = (cfg["mode"] == "pi"      and cfg["pi_domain"] != last_domain)
-        norm_changed   = (cfg["mode"] == "normal"  and (cfg["mu"] != last_mu or cfg["sigma"] != last_sigma))
-        pois_changed   = (cfg["mode"] == "poisson" and cfg["lam"] != last_lam)
-        rot_changed    = (cfg["rotation"] != last_rot)
-        idle_changed   = (cfg.get("idle_mode", "rainbow") != last_idle)
-        new_mode_extra = cfg["mode"] in ("heat", "stock", "lorenz") and mode_changed
+        sim = create_sim(cfg, log_W, log_H)
+        idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
 
-        if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra:
-            sim = create_sim(cfg, log_W, log_H)
+        last_mode   = cfg["mode"]
+        last_domain = cfg["pi_domain"]
+        last_mu     = cfg["mu"]
+        last_sigma  = cfg["sigma"]
+        last_lam    = cfg["lam"]
+        last_rot    = cfg["rotation"]
+        last_idle   = cfg.get("idle_mode", "rainbow")
 
-            last_mode   = cfg["mode"]
-            last_domain = cfg["pi_domain"]
-            last_mu     = cfg["mu"]
-            last_sigma  = cfg["sigma"]
-            last_lam    = cfg["lam"]
-            last_rot    = cfg["rotation"]
+        last_colors = ["000000"] * NLED
+        changed_pixels_total = 0
 
-            last_colors = ["000000"] * NLED
-            changed_pixels_total = 0
-            clear_matrix()
+        clear_matrix()
 
-        if idle_changed or rot_changed:
-            idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
-            last_idle = cfg.get("idle_mode", "rainbow")
+        while True:
+            with config_lock:
+                cfg = dict(config)
 
-        dt = 1.0 / max(1, cfg["fps"])
-        start = time.time()
+            log_W, log_H = get_logical_dims(cfg["rotation"])
 
-        changed_this_frame = {}
+            mode_changed   = (cfg["mode"] != last_mode)
+            pi_changed     = (cfg["mode"] == "pi"      and cfg["pi_domain"] != last_domain)
+            norm_changed   = (cfg["mode"] == "normal"  and (cfg["mu"] != last_mu or cfg["sigma"] != last_sigma))
+            pois_changed   = (cfg["mode"] == "poisson" and cfg["lam"] != last_lam)
+            rot_changed    = (cfg["rotation"] != last_rot)
+            idle_changed   = (cfg.get("idle_mode", "rainbow") != last_idle)
+            new_mode_extra = cfg["mode"] in ("heat", "stock", "lorenz") and mode_changed
 
-        if cfg["running"]:
-            for _ in range(cfg["points_per_frame"]):
-                res = sim.sample_pixel_step()
-                if res is None:
-                    continue
-                idx, hex_color = res
-                changed_this_frame[idx] = hex_color
-        else:
-            if idle_sim is not None:
+            if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra:
+                sim = create_sim(cfg, log_W, log_H)
+
+                last_mode   = cfg["mode"]
+                last_domain = cfg["pi_domain"]
+                last_mu     = cfg["mu"]
+                last_sigma  = cfg["sigma"]
+                last_lam    = cfg["lam"]
+                last_rot    = cfg["rotation"]
+
+                last_colors = ["000000"] * NLED
+                changed_pixels_total = 0
+                clear_matrix()
+
+            if idle_changed or rot_changed:
+                idle_sim = create_idle_sim(cfg.get("idle_mode", "rainbow"), log_W, log_H)
+                last_idle = cfg.get("idle_mode", "rainbow")
+
+            dt = 1.0 / max(1, cfg["fps"])
+            frame_start = time.time()
+
+            changed_this_frame = {}
+
+            if cfg["running"]:
                 for _ in range(cfg["points_per_frame"]):
-                    res = idle_sim.sample_pixel_step()
+                    res = sim.sample_pixel_step()
                     if res is None:
                         continue
                     idx, hex_color = res
                     changed_this_frame[idx] = hex_color
-
-        if changed_this_frame:
-            patch = []
-            for idx, hex_color in changed_this_frame.items():
-                if last_colors[idx] == hex_color:
-                    continue
-                last_colors[idx] = hex_color
-                patch.extend([idx, 1, hex_color])
-                if cfg["running"]:
-                    changed_pixels_total += 1
-            if patch:
-                send_frame_batched(patch)
-
-        if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
-            with config_lock:
-                status["last_error"] = ""
-            time.sleep(cfg["pixel_pause"])
-            clear_matrix()
-            last_colors = ["000000"] * NLED
-            changed_pixels_total = 0
-            sim.reset()
-            if idle_sim is not None:
-                idle_sim.reset()
-
-        with config_lock:
-            if cfg["running"]:
-                status["stats"] = sim.stats_str()
             else:
-                status["stats"] = f"idle: {cfg.get('idle_mode', 'off')}"
+                if idle_sim is not None:
+                    for _ in range(cfg["points_per_frame"]):
+                        res = idle_sim.sample_pixel_step()
+                        if res is None:
+                            continue
+                        idx, hex_color = res
+                        changed_this_frame[idx] = hex_color
 
-        elapsed = time.time() - start
-        sleep_time = dt - elapsed
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+            if changed_this_frame:
+                patch = []
+                for idx, hex_color in changed_this_frame.items():
+                    if last_colors[idx] == hex_color:
+                        continue
+                    last_colors[idx] = hex_color
+                    patch.extend([idx, 1, hex_color])
+                    if cfg["running"]:
+                        changed_pixels_total += 1
+                if patch:
+                    # Debug: how many pixels are we sending?
+                    # print(f"simulation_loop: sending {len(patch)//3} pixels", flush=True)
+                    send_frame_batched(patch)
+
+            if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
+                with config_lock:
+                    status["last_error"] = ""
+                time.sleep(cfg["pixel_pause"])
+                clear_matrix()
+                last_colors = ["000000"] * NLED
+                changed_pixels_total = 0
+                sim.reset()
+                if idle_sim is not None:
+                    idle_sim.reset()
+
+            with config_lock:
+                if cfg["running"]:
+                    status["stats"] = sim.stats_str()
+                else:
+                    status["stats"] = f"idle: {cfg.get('idle_mode', 'off')}"
+
+            elapsed = time.time() - frame_start
+            sleep_time = dt - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    except Exception as e:
+        # If this prints, the loop is crashing and exiting
+        print("simulation_loop: CRASHED:", repr(e), file=sys.stderr, flush=True)
+        with config_lock:
+            status["last_error"] = f"simulation_loop crashed: {e!r}"
 
 
+
+# ===== BACKGROUND SIMULATION THREAD STARTUP =====
+
+_sim_thread_started = False
+_sim_thread_lock = threading.Lock()
+
+def start_simulation_thread():
+    """
+    Start the background simulation loop exactly once in this process.
+    Safe to call multiple times; only the first call will spawn the thread.
+    """
+    global _sim_thread_started
+    with _sim_thread_lock:
+        if _sim_thread_started:
+            return
+        _sim_thread_started = True
+
+        t = threading.Thread(target=simulation_loop, daemon=True)
+        t.start()
+
+# When running under a WSGI server (gunicorn), this module is imported
+# and __name__ != '__main__'. We still want the simulation loop to run.
+if __name__ != "__main__":
+    start_simulation_thread()
+    
 # ===== FLASK APP =====
 
 app = Flask(__name__)
 
-INDEX_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-  <title>LED Pixel Sim Control</title>
-  <style>
-    body { font-family: sans-serif; margin: 20px; background: #111; color: #eee; }
-    label { display:block; margin-top:8px; }
-    input, select { margin-top:4px; padding:4px; }
-    .row { display:flex; gap:20px; flex-wrap:wrap; }
-    .card { border:1px solid #444; padding:12px; border-radius:6px; background:#222; min-width:260px; }
-    button { padding:6px 12px; margin-top:10px; }
-    .status { margin-top:15px; font-family:monospace; }
-  </style>
-</head>
-<body>
-  <h1>LED Matrix Pixel Simulation</h1>
-  <form method="POST">
-    <div class="row">
-      <div class="card">
-        <h3>Mode & Run</h3>
-        <label>Mode:
-          <select name="mode">
-            <option value="pi"          {% if cfg.mode == 'pi' %}selected{% endif %}>Monte Carlo π</option>
-            <option value="normal"      {% if cfg.mode == 'normal' %}selected{% endif %}>Normal Histogram</option>
-            <option value="poisson"     {% if cfg.mode == 'poisson' %}selected{% endif %}>Poisson Histogram</option>
-            <option value="random_walk" {% if cfg.mode == 'random_walk' %}selected{% endif %}>Random Walk</option>
-            <option value="life"        {% if cfg.mode == 'life' %}selected{% endif %}>Game of Life</option>
-            <option value="heat"        {% if cfg.mode == 'heat' %}selected{% endif %}>Heat Diffusion</option>
-            <option value="stock"       {% if cfg.mode == 'stock' %}selected{% endif %}>Stock GBM</option>
-            <option value="lorenz"      {% if cfg.mode == 'lorenz' %}selected{% endif %}>Lorenz Attractor</option>
-          </select>
-        </label>
-        <label>Running:
-          <select name="running">
-            <option value="true"  {% if cfg.running %}selected{% endif %}>Yes</option>
-            <option value="false" {% if not cfg.running %}selected{% endif %}>No (show idle)</option>
-          </select>
-        </label>
-        <label>Rotation:
-          <select name="rotation">
-            <option value="0"   {% if cfg.rotation == 0 %}selected{% endif %}>0° (64×16)</option>
-            <option value="90"  {% if cfg.rotation == 90 %}selected{% endif %}>90° (16×64)</option>
-            <option value="180" {% if cfg.rotation == 180 %}selected{% endif %}>180° (64×16)</option>
-            <option value="270" {% if cfg.rotation == 270 %}selected{% endif %}>270° (16×64)</option>
-          </select>
-        </label>
-      </div>
+def _start_background_sim():
+    # This will run before every request, but the thread only starts once
+    start_simulation_thread()
+# Flask 3.x: use before_request (before_first_request removed)
 
-      <div class="card">
-        <h3>Timing</h3>
-        <label>FPS:
-          <input type="number" name="fps" value="{{ cfg.fps }}" min="1" max="60" />
-        </label>
-        <label>Points per frame (steps/samples):
-          <input type="number" name="points_per_frame" value="{{ cfg.points_per_frame }}" min="1" max="1000" />
-        </label>
-        <label>Reset after (changed pixels):
-          <input type="number" name="pixel_reset_after" value="{{ cfg.pixel_reset_after }}" min="1" />
-        </label>
-        <label>Pause before restart (seconds):
-          <input type="number" step="0.1" name="pixel_pause" value="{{ cfg.pixel_pause }}" min="0" />
-        </label>
-      </div>
-
-      <div class="card">
-        <h3>Distribution Params</h3>
-        <label>π domain (pixels, Monte Carlo π):
-          <input type="number" name="pi_domain" value="{{ cfg.pi_domain }}" min="4" max="32" />
-        </label>
-        <label>Normal μ:
-          <input type="number" step="0.1" name="mu" value="{{ cfg.mu }}" />
-        </label>
-        <label>Normal σ:
-          <input type="number" step="0.1" name="sigma" value="{{ cfg.sigma }}" />
-        </label>
-        <label>Poisson λ:
-          <input type="number" step="0.1" name="lam" value="{{ cfg.lam }}" />
-        </label>
-      </div>
-
-      <div class="card">
-        <h3>Colors & Idle</h3>
-        <label>Palette:
-          <select name="palette">
-            <option value="fire"    {% if cfg.palette == 'fire' %}selected{% endif %}>Fire</option>
-            <option value="plasma"  {% if cfg.palette == 'plasma' %}selected{% endif %}>Plasma</option>
-            <option value="viridis" {% if cfg.palette == 'viridis' %}selected{% endif %}>Viridis</option>
-            <option value="turbo"   {% if cfg.palette == 'turbo' %}selected{% endif %}>Turbo</option>
-            <option value="neon"    {% if cfg.palette == 'neon' %}selected{% endif %}>Neon</option>
-            <option value="single"  {% if cfg.palette == 'single' %}selected{% endif %}>Single color</option>
-          </select>
-        </label>
-        <label>Single color (for "Single" palette):
-          <input type="color" name="single_color" value="#{{ cfg.single_color }}" />
-        </label>
-        <label>Color pattern:
-          <select name="color_pattern">
-            <option value="data"   {% if cfg.color_pattern == 'data' %}selected{% endif %}>Data-driven</option>
-            <option value="random" {% if cfg.color_pattern == 'random' %}selected{% endif %}>Random per pixel</option>
-            <option value="grad_x" {% if cfg.color_pattern == 'grad_x' %}selected{% endif %}>Gradient across X</option>
-            <option value="grad_y" {% if cfg.color_pattern == 'grad_y' %}selected{% endif %}>Gradient across Y</option>
-          </select>
-        </label>
-        <label>Idle animation (when paused):
-          <select name="idle_mode">
-            <option value="off"     {% if cfg.idle_mode == 'off' %}selected{% endif %}>Off</option>
-            <option value="rainbow" {% if cfg.idle_mode == 'rainbow' %}selected{% endif %}>Rainbow swirl</option>
-            <option value="noise"   {% if cfg.idle_mode == 'noise' %}selected{% endif %}>Noise field</option>
-            <option value="matrix"  {% if cfg.idle_mode == 'matrix' %}selected{% endif %}>Matrix rain</option>
-            <option value="galaxy"  {% if cfg.idle_mode == 'galaxy' %}selected{% endif %}>Galaxy starfield</option>
-            <option value="sparkle" {% if cfg.idle_mode == 'sparkle' %}selected{% endif %}>Sparkle</option>
-          </select>
-        </label>
-      </div>
-    </div>
-
-    <button type="submit">Apply</button>
-    <button type="submit" name="action" value="clear">Clear Matrix</button>
-  </form>
-
-  <div class="status">
-    <div><strong>Stats:</strong> {{ stats }}</div>
-    <div><strong>Last error:</strong> {{ last_error or '(none)' }}</div>
-  </div>
-
-  <p style="margin-top:10px; font-size:0.9em; color:#888;">
-    Pixel-only mode: one-pixel-at-a-time build, low network load.<br>
-    Rotation switches logical 64×16 / 16×64; palettes, color patterns, and idle modes control the art.
-  </p>
-</body>
-</html>
-"""
-
+@app.before_request
+def _ensure_sim_thread():
+    start_simulation_thread()
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -1444,7 +1354,7 @@ def index():
         stats = status["stats"]
         last_error = status["last_error"]
 
-    return render_template_string(INDEX_HTML, cfg=cfg_obj, stats=stats, last_error=last_error)
+    return render_template("index.html", cfg=cfg_obj, stats=stats, last_error=last_error)
 
 
 @app.route("/status")
@@ -1485,12 +1395,14 @@ def apply_external_config():
             config["idle_mode"] = args.idle_mode
 
 
+
 if __name__ == "__main__":
     apply_external_config()
 
-    t = threading.Thread(target=simulation_loop, daemon=True)
-    t.start()
+    # Start simulation loop in dev mode
+    start_simulation_thread()
 
-    print("Starting pixel-only LED sim UI on http://localhost:5000")
+    print("Starting pixel-only LED sim UI on http://localhost:5030")
     print("Physical panel: 64x16; logical grid switches between 64x16 and 16x64 with rotation.")
     app.run(host="0.0.0.0", port=5030, debug=False)
+
