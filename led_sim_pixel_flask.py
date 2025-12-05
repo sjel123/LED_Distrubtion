@@ -63,6 +63,9 @@ config = {
     # "fire", "plasma", "viridis", "turbo", "neon"
     "palette": "fire",
 
+    # When palette == "single", use this hex color (rrggbb)
+    "single_color": "ffffff",
+
     # Idle animation when running == False
     # "off", "rainbow", "noise", "matrix", "galaxy", "sparkle"
     "idle_mode": "rainbow",
@@ -161,12 +164,25 @@ NEON_STOPS = [
 ]
 
 
-def palette_color(t: float, palette_name: str) -> str:
+def palette_color(t: float, palette_name: str, single_color: str | None = None) -> str:
     """
     Map a scalar t in [0,1] to a hex color using the configured palette.
+    If palette_name == "single", ignore t and return single_color.
     """
-    t = clamp01(t)
     p = (palette_name or "").lower()
+
+    # Handle single-color mode
+    if p == "single":
+        col = (single_color or "ffffff").strip().lower()
+        if col.startswith("#"):
+            col = col[1:]
+        if len(col) != 6:
+            col = "ffffff"
+        # Assume it's valid hex now
+        return col
+
+    # Gradient palettes
+    t = clamp01(t)
     if p == "fire":
         c = gradient_color(FIRE_STOPS, t)
     elif p == "plasma":
@@ -184,6 +200,7 @@ def palette_color(t: float, palette_name: str) -> str:
             t,
         )
     return rgb_to_hex(c)
+
 
 
 # ===== HTTP / LED HELPERS =====
@@ -357,7 +374,8 @@ class MonteCarloPi:
 
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)   
 
         idx = logical_to_index(px, py)
         return idx, hex_color
@@ -421,7 +439,8 @@ class NormalHistogram:
         t = bin_idx / max(1, self.bins - 1)
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(bin_idx, y)
         return idx, hex_color
@@ -507,7 +526,8 @@ class PoissonHistogram:
         t = bin_idx / max(1, self.bins - 1)
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(bin_idx, y)
         return idx, hex_color
@@ -548,7 +568,8 @@ class RandomWalkSim:
         t = (self.steps % 1000) / 1000.0
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(self.x, self.y)
         return idx, hex_color
@@ -633,7 +654,8 @@ class GameOfLifeSim:
             t = (self.generation % 256) / 255.0
             with config_lock:
                 pal = config.get("palette", "fire")
-            hex_color = palette_color(t, pal)
+                sc  = config.get("single_color", "ffffff")
+            hex_color = palette_color(t, pal, sc)
         else:
             hex_color = "000000"
 
@@ -710,7 +732,8 @@ class IdleNoise(IdleBase):
 
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(lx, ly)
         return idx, hex_color
@@ -751,7 +774,8 @@ class IdleMatrixRain(IdleBase):
         t = clamp01(0.4 + 0.2 * random.random())
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(x, y)
         self.heads[x] = head + 1
@@ -788,7 +812,8 @@ class IdleGalaxy(IdleBase):
 
         with config_lock:
             pal = config.get("palette", "fire")
-        hex_color = palette_color(t, pal)
+            sc  = config.get("single_color", "ffffff")
+        hex_color = palette_color(t, pal, sc)
 
         idx = logical_to_index(s["x"], s["y"])
         return idx, hex_color
@@ -1052,7 +1077,11 @@ INDEX_HTML = """
             <option value="viridis" {% if cfg.palette == 'viridis' %}selected{% endif %}>Viridis</option>
             <option value="turbo"   {% if cfg.palette == 'turbo' %}selected{% endif %}>Turbo</option>
             <option value="neon"    {% if cfg.palette == 'neon' %}selected{% endif %}>Neon</option>
+            <option value="single"  {% if cfg.palette == 'single' %}selected{% endif %}>Single color</option>
           </select>
+        </label>
+        <label>Single color (for "Single" palette):
+            <input type="color" name="single_color" value="#{{ cfg.single_color }}" />
         </label>
         <label>Idle animation (when paused):
           <select name="idle_mode">
@@ -1122,6 +1151,16 @@ def index():
             # Palette & idle mode from UI
             config["palette"] = request.form.get("palette", config["palette"])
             config["idle_mode"] = request.form.get("idle_mode", config.get("idle_mode", "rainbow"))
+
+            # New: single color handling
+            single = request.form.get("single_color", "#" + config.get("single_color", "ffffff"))
+            single = single.strip()
+            if single.startswith("#"):
+                single = single[1:]
+            single = single.lower()
+            if len(single) != 6:
+                single = config.get("single_color", "ffffff")
+            config["single_color"] = single
 
             # Rotation: sanitize into {0, 90, 180, 270}
             rot_str = request.form.get("rotation", str(config["rotation"]))
