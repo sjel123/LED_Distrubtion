@@ -13,7 +13,7 @@ This project simulates LED art for a WLED 64×16 panel by generating one pixel a
 4. The UI controls mode, FPS, color pattern, rotation, idle animations, and distribution parameters for each simulation.
 
 ## Simulation controls
-- **Mode** selects which algorithm drives the pixels (Monte Carlo π, histograms, random walk, a longer-step random walk variant, heat diffusion, Game of Life, stock GBM, Lorenz attractor).
+- **Mode** selects which algorithm drives the pixels (Monte Carlo π, histograms, random walk, a longer-step random walk variant, multi-strip oscillator, heat diffusion, Game of Life, stock GBM, Lorenz attractor).
 - **Running** toggles between active simulation and configurable idle animation.
 - **Rotation** swaps logical dimensions between 64×16 and 16×64; the code automatically remaps logical coordinates when rotation changes.
 - **Timing** includes FPS, points-per-frame (samples per iteration), pixel reset threshold, and pause duration after a reset.

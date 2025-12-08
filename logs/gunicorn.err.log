@@ -103,3 +103,23 @@ SystemExit: 0
 [2025-12-08 08:36:44 -0500] [12196] [INFO] Listening at: http://0.0.0.0:5030 (12196)
 [2025-12-08 08:36:44 -0500] [12196] [INFO] Using worker: sync
 [2025-12-08 08:36:44 -0500] [12200] [INFO] Booting worker with pid: 12200
+[2025-12-08 08:39:15 -0500] [12196] [INFO] Handling signal: term
+[2025-12-08 08:39:42 -0500] [12200] [INFO] Worker exiting (pid: 12200)
+[2025-12-08 08:58:51 -0500] [15899] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:58:51 -0500] [15899] [INFO] Listening at: http://0.0.0.0:5030 (15899)
+[2025-12-08 08:58:51 -0500] [15899] [INFO] Using worker: sync
+[2025-12-08 08:58:51 -0500] [15955] [INFO] Booting worker with pid: 15955
+[2025-12-08 09:07:12 -0500] [15899] [INFO] Handling signal: term
+[2025-12-08 09:07:12 -0500] [15955] [INFO] Worker exiting (pid: 15955)
+[2025-12-08 09:07:12 -0500] [15899] [INFO] Shutting down: Master
+[2025-12-08 09:07:12 -0500] [17064] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 09:07:12 -0500] [17064] [INFO] Listening at: http://0.0.0.0:5030 (17064)
+[2025-12-08 09:07:12 -0500] [17064] [INFO] Using worker: sync
+[2025-12-08 09:07:12 -0500] [17120] [INFO] Booting worker with pid: 17120
+[2025-12-08 09:24:59 -0500] [17064] [INFO] Handling signal: term
+[2025-12-08 09:24:59 -0500] [17120] [INFO] Worker exiting (pid: 17120)
+[2025-12-08 09:24:59 -0500] [17064] [INFO] Shutting down: Master
+[2025-12-08 09:25:00 -0500] [20638] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 09:25:00 -0500] [20638] [INFO] Listening at: http://0.0.0.0:5030 (20638)
+[2025-12-08 09:25:00 -0500] [20638] [INFO] Using worker: sync
+[2025-12-08 09:25:00 -0500] [20684] [INFO] Booting worker with pid: 20684

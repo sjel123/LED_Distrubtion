@@ -1,6 +1,6 @@
 # LED Matrix Monte Carlo Simulations
 
-A pixel-at-a-time simulation server for driving a WLED 64×16 matrix. It hosts several statistical/visual simulations (Monte Carlo π, histograms, diffusion, random walk with a long-step variant, Lorenz attractor) plus idle animations, exposes a Flask control UI, and pushes updates directly to WLED (one pixel per change) to minimize bandwidth.
+A pixel-at-a-time simulation server for driving a WLED 64×16 matrix. It hosts several statistical/visual simulations (Monte Carlo π, histograms, diffusion, random walk with a long-step variant, multi-strip oscillator, Lorenz attractor) plus idle animations, exposes a Flask control UI, and pushes updates directly to WLED (one pixel per change) to minimize bandwidth.
 
 ## Getting started
 

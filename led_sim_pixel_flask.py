@@ -12,6 +12,7 @@ Simulation modes:
     - normal    : Normal distribution histogram
     - poisson   : Poisson distribution histogram
     - random_walk : Single-pixel random walk
+    - oscillator  : Multi-strip oscillator with phase-shifted bands
     - life      : Conway's Game of Life
     - heat      : Heat diffusion / reaction-diffusion-like pattern
     - stock     : Stock price Monte Carlo (GBM sparkline)
@@ -58,7 +59,7 @@ config_lock = threading.Lock()
 config = {
     # Modes:
     # "pi", "normal", "poisson", "random_walk", "life",
-    # "heat", "stock", "lorenz"
+    # "heat", "stock", "lorenz", "oscillator"
     "mode": "pi",
     "fps": 15,
     "points_per_frame": 20,
@@ -683,6 +684,42 @@ class RandomWalkSim3:
         return f"Random Walk (longer steps): steps={self.steps:8d}"
 
 
+class MultiStripOscillator:
+    """Oscillating multi-strip bands that pulse with independent phases."""
+    def __init__(self, log_width, log_height, band_count=8):
+        self.W = log_width
+        self.H = log_height
+        self.band_count = max(1, min(band_count, self.H or 1))
+        self.phases = [random.uniform(0, 2 * math.pi) for _ in range(self.band_count)]
+        self.speeds = [0.01 + random.random() * 0.03 for _ in range(self.band_count)]
+        self.index = 0
+        self.pixel_count = max(1, self.W * self.H)
+
+    def reset(self):
+        self.phases = [random.uniform(0, 2 * math.pi) for _ in range(self.band_count)]
+        self.index = 0
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+        lx = self.index % self.W
+        ly = (self.index // self.W) % self.H
+
+        band = min(self.band_count - 1, int(ly * self.band_count / max(1, self.H)))
+        phase = self.phases[band]
+        brightness = 0.3 + 0.7 * (0.5 * (1 + math.sin(phase)))
+        self.phases[band] += self.speeds[band]
+
+        hex_color = apply_color_pattern(brightness, lx, ly)
+        idx = logical_to_index(lx, ly)
+
+        self.index = (self.index + 1) % self.pixel_count
+        return idx, hex_color
+
+    def stats_str(self):
+        return f"Oscillator: {self.band_count} bands"
+
+
 class GameOfLifeSim:
     """
     Conway's Game of Life on a logical W x H grid.
@@ -1206,6 +1243,8 @@ def create_sim(cfg, log_W, log_H):
         return RandomWalkSim(log_width=log_W, log_height=log_H)
     elif mode == "random_walk3":
         return RandomWalkSim3(log_width=log_W, log_height=log_H)
+    elif mode == "oscillator":
+        return MultiStripOscillator(log_width=log_W, log_height=log_H)
     elif mode == "life":
         return GameOfLifeSim(log_width=log_W, log_height=log_H)
     elif mode == "heat":
