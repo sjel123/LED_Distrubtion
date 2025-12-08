@@ -1,0 +1,105 @@
+[2025-12-05 15:33:52 -0500] [56582] [INFO] Starting gunicorn 23.0.0
+[2025-12-05 15:33:52 -0500] [56582] [INFO] Listening at: http://0.0.0.0:5030 (56582)
+[2025-12-05 15:33:52 -0500] [56582] [INFO] Using worker: sync
+[2025-12-05 15:33:52 -0500] [56586] [INFO] Booting worker with pid: 56586
+[2025-12-05 15:34:07 -0500] [56582] [INFO] Handling signal: int
+[2025-12-05 15:34:07 -0500] [56586] [INFO] Worker exiting (pid: 56586)
+[2025-12-05 15:34:07 -0500] [56582] [INFO] Shutting down: Master
+[2025-12-08 07:58:45 -0500] [7251] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 07:58:45 -0500] [7251] [INFO] Listening at: http://0.0.0.0:5030 (7251)
+[2025-12-08 07:58:45 -0500] [7251] [INFO] Using worker: sync
+[2025-12-08 07:58:45 -0500] [7255] [INFO] Booting worker with pid: 7255
+[2025-12-08 08:00:35 -0500] [7251] [INFO] Handling signal: int
+[2025-12-08 08:00:35 -0500] [7255] [ERROR] Error handling request (no URI read)
+Traceback (most recent call last):
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/workers/sync.py", line 133, in handle
+    req = next(parser)
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/parser.py", line 41, in __next__
+    self.mesg = self.mesg_class(self.cfg, self.unreader, self.source_addr, self.req_count)
+                ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/message.py", line 259, in __init__
+    super().__init__(cfg, unreader, peer_addr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/message.py", line 60, in __init__
+    unused = self.parse(self.unreader)
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/message.py", line 271, in parse
+    self.get_data(unreader, buf, stop=True)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/message.py", line 262, in get_data
+    data = unreader.read()
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/unreader.py", line 36, in read
+    d = self.chunk()
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/http/unreader.py", line 63, in chunk
+    return self.sock.recv(self.mxchunk)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/workers/base.py", line 198, in handle_quit
+    time.sleep(0.1)
+    ~~~~~~~~~~^^^^^
+  File "/Users/sjelinsky/PythonEnv/lib/python3.13/site-packages/gunicorn/workers/base.py", line 199, in handle_quit
+    sys.exit(0)
+    ~~~~~~~~^^^
+SystemExit: 0
+[2025-12-08 08:00:36 -0500] [7255] [INFO] Worker exiting (pid: 7255)
+[2025-12-08 08:00:36 -0500] [7251] [INFO] Shutting down: Master
+[2025-12-08 08:01:44 -0500] [7994] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:01:44 -0500] [7994] [INFO] Listening at: http://0.0.0.0:5030 (7994)
+[2025-12-08 08:01:44 -0500] [7994] [INFO] Using worker: sync
+[2025-12-08 08:01:44 -0500] [7998] [INFO] Booting worker with pid: 7998
+[2025-12-08 08:03:56 -0500] [7994] [INFO] Handling signal: int
+[2025-12-08 08:03:56 -0500] [7998] [INFO] Worker exiting (pid: 7998)
+[2025-12-08 08:03:56 -0500] [7994] [INFO] Shutting down: Master
+[2025-12-08 08:11:18 -0500] [10380] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:11:18 -0500] [10380] [INFO] Listening at: http://0.0.0.0:5030 (10380)
+[2025-12-08 08:11:18 -0500] [10380] [INFO] Using worker: sync
+[2025-12-08 08:11:18 -0500] [10426] [INFO] Booting worker with pid: 10426
+[2025-12-08 08:23:58 -0500] [10380] [INFO] Handling signal: term
+[2025-12-08 08:23:58 -0500] [10426] [INFO] Worker exiting (pid: 10426)
+[2025-12-08 08:23:58 -0500] [10380] [INFO] Shutting down: Master
+[2025-12-08 08:23:58 -0500] [11142] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:23:58 -0500] [11142] [INFO] Listening at: http://0.0.0.0:5030 (11142)
+[2025-12-08 08:23:58 -0500] [11142] [INFO] Using worker: sync
+[2025-12-08 08:23:58 -0500] [11188] [INFO] Booting worker with pid: 11188
+[2025-12-08 08:26:15 -0500] [11142] [INFO] Handling signal: term
+[2025-12-08 08:26:15 -0500] [11188] [INFO] Worker exiting (pid: 11188)
+[2025-12-08 08:26:16 -0500] [11142] [INFO] Shutting down: Master
+[2025-12-08 08:26:16 -0500] [11300] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:26:16 -0500] [11300] [INFO] Listening at: http://0.0.0.0:5030 (11300)
+[2025-12-08 08:26:16 -0500] [11300] [INFO] Using worker: sync
+[2025-12-08 08:26:16 -0500] [11346] [INFO] Booting worker with pid: 11346
+[2025-12-08 08:29:21 -0500] [11300] [INFO] Handling signal: term
+[2025-12-08 08:29:21 -0500] [11346] [INFO] Worker exiting (pid: 11346)
+[2025-12-08 08:29:21 -0500] [11300] [INFO] Shutting down: Master
+[2025-12-08 08:29:21 -0500] [11676] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:29:21 -0500] [11676] [INFO] Listening at: http://0.0.0.0:5030 (11676)
+[2025-12-08 08:29:21 -0500] [11676] [INFO] Using worker: sync
+[2025-12-08 08:29:21 -0500] [11722] [INFO] Booting worker with pid: 11722
+[2025-12-08 08:36:18 -0500] [11676] [INFO] Handling signal: term
+[2025-12-08 08:36:23 -0500] [12138] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:36:23 -0500] [12138] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:23 -0500] [12138] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:24 -0500] [12138] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:24 -0500] [12138] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:25 -0500] [12138] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:25 -0500] [12138] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:26 -0500] [12138] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:26 -0500] [12138] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:27 -0500] [12138] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:27 -0500] [12138] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:28 -0500] [12138] [ERROR] Can't connect to ('0.0.0.0', 5030)
+[2025-12-08 08:36:33 -0500] [12187] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:36:33 -0500] [12187] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:33 -0500] [12187] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:34 -0500] [12187] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:34 -0500] [12187] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:35 -0500] [12187] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:35 -0500] [12187] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:36 -0500] [12187] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:36 -0500] [12187] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:37 -0500] [12187] [ERROR] Connection in use: ('0.0.0.0', 5030)
+[2025-12-08 08:36:37 -0500] [12187] [ERROR] connection to ('0.0.0.0', 5030) failed: [Errno 48] Address already in use
+[2025-12-08 08:36:38 -0500] [12187] [ERROR] Can't connect to ('0.0.0.0', 5030)
+[2025-12-08 08:36:39 -0500] [11722] [INFO] Worker exiting (pid: 11722)
+[2025-12-08 08:36:44 -0500] [12196] [INFO] Starting gunicorn 23.0.0
+[2025-12-08 08:36:44 -0500] [12196] [INFO] Listening at: http://0.0.0.0:5030 (12196)
+[2025-12-08 08:36:44 -0500] [12196] [INFO] Using worker: sync
+[2025-12-08 08:36:44 -0500] [12200] [INFO] Booting worker with pid: 12200

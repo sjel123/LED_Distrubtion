@@ -7,18 +7,18 @@ This project simulates LED art for a WLED 64×16 panel by generating one pixel a
 1. Ensure Python 3.11+ is installed and dependencies from `requirements.txt` (if present) are satisfied.
 2. Run `python3 led_sim_pixel_flask.py`. The CLI accepts optional flags:
    - `--config <path>`: load overrides from a JSON file.
-   - `--palette <fire|plasma|viridis|turbo|neon|single>`: force the initial palette.
+   - `--palette <fire|plasma|viridis|turbo|neon|rainbow|aurora|random|single>`: force the initial palette.
    - `--idle-mode <off|rainbow|noise|matrix|galaxy|sparkle>`: initial idle animation when paused.
 3. Access `http://localhost:5030` to open the UI.
 4. The UI controls mode, FPS, color pattern, rotation, idle animations, and distribution parameters for each simulation.
 
 ## Simulation controls
-- **Mode** selects which algorithm drives the pixels (Monte Carlo π, histograms, random walk, heat diffusion, Game of Life, stock GBM, Lorenz attractor).
+- **Mode** selects which algorithm drives the pixels (Monte Carlo π, histograms, random walk, a longer-step random walk variant, heat diffusion, Game of Life, stock GBM, Lorenz attractor).
 - **Running** toggles between active simulation and configurable idle animation.
 - **Rotation** swaps logical dimensions between 64×16 and 16×64; the code automatically remaps logical coordinates when rotation changes.
 - **Timing** includes FPS, points-per-frame (samples per iteration), pixel reset threshold, and pause duration after a reset.
 - **Distribution parameters** let you tune normal/Poisson histograms and Monte Carlo π domain size.
-- **Palette/Color pattern** control palette selection, single-color overrides, and alternative gradients.
+- **Palette/Color pattern** control palette selection (fire, plasma, viridis, turbo, neon, rainbow, aurora, random, or single-color), single-color overrides, and alternative gradients.
 - **Idle animation** governs the fallback textures shown when simulations are paused.
 
 ## JSON status endpoint

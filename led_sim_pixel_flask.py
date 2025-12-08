@@ -21,6 +21,7 @@ Other features:
     - Pixel build: one-pixel-at-a-time, sending only changed pixels
     - Auto-reset after N changed pixels (with pause and clear)
     - Color palettes: fire, plasma, viridis, turbo, neon, single
+    - Color palettes: fire, plasma, viridis, turbo, neon, rainbow, aurora, single
     - Color patterns: data, random, grad_x, grad_y
     - Idle animations when simulations are paused:
         off, rainbow, noise, matrix, galaxy, sparkle
@@ -74,7 +75,7 @@ config = {
     "rotation": 0,
 
     # Color palette / theme
-    # "fire", "plasma", "viridis", "turbo", "neon", "single"
+    # "fire", "plasma", "viridis", "turbo", "neon", "rainbow", "aurora", "random", "single"
     "palette": "fire",
 
     # When palette == "single", use this hex color (rrggbb, no '#')
@@ -184,6 +185,25 @@ NEON_STOPS = [
     (255, 0, 128),
 ]
 
+RAINBOW_STOPS = [
+    (255, 0, 0),
+    (255, 127, 0),
+    (255, 255, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (75, 0, 130),
+    (148, 0, 211),
+]
+
+AURORA_STOPS = [
+    (12, 9, 79),
+    (2, 48, 71),
+    (0, 99, 73),
+    (0, 164, 148),
+    (255, 200, 87),
+    (245, 91, 59),
+]
+
 
 def palette_color(t, palette_name, single_color=None):
     """
@@ -201,6 +221,12 @@ def palette_color(t, palette_name, single_color=None):
             col = "ffffff"
         return col
 
+    if p == "random":
+        r = random.randint(0, 255)
+        g = random.randint(0, 255)
+        b = random.randint(0, 255)
+        return rgb_to_hex((r, g, b))
+
     # Gradient palettes
     t = clamp01(t)
     if p == "fire":
@@ -213,6 +239,10 @@ def palette_color(t, palette_name, single_color=None):
         c = gradient_color(TURBO_STOPS, t)
     elif p == "neon":
         c = gradient_color(NEON_STOPS, t)
+    elif p == "rainbow":
+        c = gradient_color(RAINBOW_STOPS, t)
+    elif p == "aurora":
+        c = gradient_color(AURORA_STOPS, t)
     else:
         # fallback: blue → cyan → yellow
         c = gradient_color(
@@ -572,7 +602,6 @@ class PoissonHistogram:
         mean = self.sum_k / float(self.sample_count)
         return f"n={self.sample_count:8d}  mean k≈{mean:6.3f}  λ={self.lam:5.2f}"
 
-
 class RandomWalkSim:
     """
     Single-pixel random walk with trails in logical W x H.
@@ -606,6 +635,52 @@ class RandomWalkSim:
 
     def stats_str(self):
         return f"Random Walk: steps={self.steps:8d}"
+
+
+class RandomWalkSim3:
+    """
+    Single-pixel random walk with trails in logical W x H.
+    Steps can move between one and three pixels per update.
+    All pixels in the jump are emitted so the entire path lights up.
+    """
+    def __init__(self, log_width, log_height):
+        self.W = log_width
+        self.H = log_height
+        self.x = self.W // 2
+        self.y = self.H // 2
+        self.steps = 0
+
+    def reset(self):
+        self.x = self.W // 2
+        self.y = self.H // 2
+        self.steps = 0
+
+    def sample_pixel_step(self):
+        if self.W <= 0 or self.H <= 0:
+            return None
+
+        dx, dy = random.choice([(1, 0), (-1, 0), (0, 1), (0, -1)])
+        distance = random.randint(1, 3)
+
+        path_pixels = []
+        base_step = self.steps
+        for i in range(1, distance + 1):
+            px = (self.x + dx * i) % self.W
+            py = (self.y + dy * i) % self.H
+            step_num = base_step + i
+            t_base = (step_num % 1000) / 1000.0
+            hex_color = apply_color_pattern(t_base, px, py)
+            idx = logical_to_index(px, py)
+            path_pixels.append((idx, hex_color))
+
+        self.x = (self.x + dx * distance) % self.W
+        self.y = (self.y + dy * distance) % self.H
+        self.steps += distance
+
+        return path_pixels
+
+    def stats_str(self):
+        return f"Random Walk (longer steps): steps={self.steps:8d}"
 
 
 class GameOfLifeSim:
@@ -1129,6 +1204,8 @@ def create_sim(cfg, log_W, log_H):
         return PoissonHistogram(lam=cfg["lam"], log_width=log_W, log_height=log_H)
     elif mode == "random_walk":
         return RandomWalkSim(log_width=log_W, log_height=log_H)
+    elif mode == "random_walk3":
+        return RandomWalkSim3(log_width=log_W, log_height=log_H)
     elif mode == "life":
         return GameOfLifeSim(log_width=log_W, log_height=log_H)
     elif mode == "heat":
@@ -1209,8 +1286,9 @@ def simulation_loop():
                     res = sim.sample_pixel_step()
                     if res is None:
                         continue
-                    idx, hex_color = res
-                    changed_this_frame[idx] = hex_color
+                    updates = res if isinstance(res, list) else [res]
+                    for idx, hex_color in updates:
+                        changed_this_frame[idx] = hex_color
             else:
                 if idle_sim is not None:
                     for _ in range(cfg["points_per_frame"]):
@@ -1372,7 +1450,7 @@ def apply_external_config():
     parser = argparse.ArgumentParser(description="LED matrix Monte Carlo & art server")
     parser.add_argument("--config", help="Path to JSON config file", default=None)
     parser.add_argument("--palette", help="Palette override",
-                        choices=["fire", "plasma", "viridis", "turbo", "neon", "single"])
+                        choices=["fire", "plasma", "viridis", "turbo", "neon", "rainbow", "aurora", "random", "single"])
     parser.add_argument("--idle-mode", help="Idle mode override",
                         choices=["off", "rainbow", "noise", "matrix", "galaxy", "sparkle"])
     args = parser.parse_args()
