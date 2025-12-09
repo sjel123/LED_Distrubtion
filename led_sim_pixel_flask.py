@@ -42,6 +42,7 @@ import argparse
 import json
 import os
 import sys
+from collections import deque
 
 from flask import Flask, request, render_template, jsonify
 
@@ -71,6 +72,7 @@ config = {
 
     "pixel_reset_after": 800,  # changed pixels before reset (for main sims)
     "pixel_pause": 2.0,        # seconds to pause before clear+restart
+    "worm_length": 16,         # length of the worm mode
 
     # Rotation angle in degrees: 0, 90, 180, or 270
     "rotation": 0,
@@ -684,6 +686,327 @@ class RandomWalkSim3:
         return f"Random Walk (longer steps): steps={self.steps:8d}"
 
 
+class RowRaceSim:
+    """Fill random rows until a row reaches full width and flash the winner."""
+    def __init__(self, log_width, log_height):
+        self.W = log_width
+        self.H = log_height
+        self.last_winner = None
+        self.last_steps = 0
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+        self._start_new_race()
+
+    def _start_new_race(self):
+        self.counts = [0] * self.H
+        self.steps = 0
+
+    def reset(self):
+        self._start_new_race()
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+
+    def sample_pixel_step(self):
+        now = time.time()
+        if self.pause_until and now < self.pause_until:
+            return None
+        if self.pause_until and now >= self.pause_until:
+            self._start_new_race()
+            self.pause_until = 0.0
+            self._last_patch_skip_count = True
+            return self._clear_patch()
+
+        if self.W <= 0 or self.H <= 0:
+            return None
+
+        row = random.randrange(self.H)
+        if self.counts[row] >= self.W:
+            return None
+
+        col = self.counts[row]
+        self.counts[row] = min(self.W, col + 1)
+        self.steps += 1
+
+        if self.counts[row] >= self.W:
+            self.last_winner = row
+            winning_steps = self.steps
+            winning_color = apply_color_pattern(0.5, self.W // 2, row)
+            updates = [
+                (logical_to_index(x, y), winning_color)
+                for y in range(self.H)
+                for x in range(self.W)
+            ]
+            self.last_steps = winning_steps
+            self.pause_until = time.time() + 2.0
+            self._last_patch_skip_count = True
+            return updates
+
+        denom = max(1, self.W - 1)
+        t_base = col / float(denom)
+        hex_color = apply_color_pattern(t_base, col, row)
+        idx = logical_to_index(col, row)
+        self._last_patch_skip_count = False
+        return idx, hex_color
+
+    def stats_str(self):
+        if self.last_winner is None:
+            return "Row race: racing..."
+        return f"Row race: row {self.last_winner} won in {self.last_steps:5d} pixels"
+
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
+
+
+class ColumnRaceSim:
+    """Fill random columns until a column reaches full height and flash the winner."""
+    def __init__(self, log_width, log_height):
+        self.W = log_width
+        self.H = log_height
+        self.last_winner = None
+        self.last_steps = 0
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+        self._start_new_race()
+
+    def _start_new_race(self):
+        self.counts = [0] * self.W
+        self.steps = 0
+
+    def reset(self):
+        self._start_new_race()
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+
+    def sample_pixel_step(self):
+        now = time.time()
+        if self.pause_until and now < self.pause_until:
+            return None
+        if self.pause_until and now >= self.pause_until:
+            self._start_new_race()
+            self.pause_until = 0.0
+            self._last_patch_skip_count = True
+            return self._clear_patch()
+
+        if self.W <= 0 or self.H <= 0:
+            return None
+
+        col = random.randrange(self.W)
+        if self.counts[col] >= self.H:
+            return None
+
+        row = self.counts[col]
+        self.counts[col] = min(self.H, row + 1)
+        self.steps += 1
+
+        if self.counts[col] >= self.H:
+            self.last_winner = col
+            winning_steps = self.steps
+            winning_color = apply_color_pattern(0.5, col, self.H // 2)
+            updates = [
+                (logical_to_index(x, y), winning_color)
+                for y in range(self.H)
+                for x in range(self.W)
+            ]
+            self.last_steps = winning_steps
+            self.pause_until = time.time() + 2.0
+            self._last_patch_skip_count = True
+            return updates
+
+        denom = max(1, self.H - 1)
+        t_base = row / float(denom)
+        hex_color = apply_color_pattern(t_base, col, row)
+        idx = logical_to_index(col, row)
+        self._last_patch_skip_count = False
+        return idx, hex_color
+
+    def stats_str(self):
+        if self.last_winner is None:
+            return "Column race: racing..."
+        return f"Column race: column {self.last_winner} won in {self.last_steps:5d} pixels"
+
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
+
+
+class RandomPixelSim:
+    """Light random unlit pixels until the canvas fills, then clear and restart."""
+    def __init__(self, log_width, log_height):
+        self.W = log_width
+        self.H = log_height
+        self.available = []
+        self.steps = 0
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+        self._start_new_round()
+
+    def _start_new_round(self):
+        self.available = [(x, y) for y in range(self.H) for x in range(self.W)]
+        self.steps = 0
+
+    def reset(self):
+        self._start_new_round()
+        self.pause_until = 0.0
+        self._last_patch_skip_count = False
+
+    def sample_pixel_step(self):
+        if self.pause_until:
+            now = time.time()
+            if now < self.pause_until:
+                return None
+            self.pause_until = 0.0
+            self._last_patch_skip_count = True
+            self._start_new_round()
+            return self._clear_patch()
+
+        if not self.available:
+            self._start_new_round()
+            self.pause_until = time.time() + 0.5
+            self._last_patch_skip_count = True
+            return self._clear_patch()
+
+        if self.W <= 0 or self.H <= 0:
+            return None
+
+        x, y = random.choice(self.available)
+        self.available.remove((x, y))
+        self.steps += 1
+
+        t_base = random.random()
+        hex_color = apply_color_pattern(t_base, x, y)
+        idx = logical_to_index(x, y)
+        self._last_patch_skip_count = False
+        return idx, hex_color
+
+    def stats_str(self):
+        remaining = len(self.available)
+        return f"Random pixels: {self.steps:4d} placed, {remaining:4d} left"
+
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
+
+
+class WormSim:
+    """Move a fixed-length worm without self-overlaps, wrapping the grid like Snake."""
+    DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    def __init__(self, log_width, log_height, length=16):
+        self.W = log_width
+        self.H = log_height
+        self.length = max(1, length)
+        self.positions = deque()
+        self.occupied = set()
+        self.current_direction = random.choice(self.DIRECTIONS)
+        self.steps = 0
+        self.pause_until = 0.0
+        self._clear_after_pause = False
+        self._last_patch_skip_count = False
+        self._start_new_worm()
+
+    def _start_new_worm(self):
+        self.positions.clear()
+        self.occupied.clear()
+        mid_x = self.W // 2
+        mid_y = self.H // 2
+        for offset in range(self.length):
+            x = (mid_x - offset) % max(1, self.W)
+            y = mid_y % max(1, self.H)
+            self.positions.append((x, y))
+        self.occupied.update(self.positions)
+        self.current_direction = random.choice(self.DIRECTIONS)
+        self.steps = 0
+
+    def reset(self):
+        self._start_new_worm()
+
+    def _wrapped(self, x, y):
+        return x % max(1, self.W), y % max(1, self.H)
+
+    def sample_pixel_step(self):
+        now = time.time()
+        if self.pause_until:
+            if now < self.pause_until:
+                return None
+            self.pause_until = 0.0
+            if self._clear_after_pause:
+                self._clear_after_pause = False
+                self._start_new_worm()
+                self._last_patch_skip_count = True
+                return self._clear_patch()
+
+        if self.W <= 0 or self.H <= 0 or not self.positions:
+            return None
+
+        head_x, head_y = self.positions[0]
+        tail = self.positions[-1]
+        neck = self.positions[1] if len(self.positions) > 1 else None
+        candidates = self.DIRECTIONS.copy()
+        random.shuffle(candidates)
+        next_pos = None
+        for dx, dy in candidates:
+            if neck and (head_x + dx, head_y + dy) == neck:
+                continue
+            nx, ny = self._wrapped(head_x + dx, head_y + dy)
+            if (nx, ny) == tail or (nx, ny) not in self.occupied:
+                next_pos = (nx, ny)
+                self.current_direction = (dx, dy)
+                break
+        if next_pos is None:
+            explosion = self._mini_explosion(head_x, head_y)
+            self.pause_until = time.time() + 2.0
+            self._clear_after_pause = True
+            self._last_patch_skip_count = True
+            return explosion
+
+        tail = self.positions.pop()
+        self.occupied.remove(tail)
+        self.positions.appendleft(next_pos)
+        self.occupied.add(next_pos)
+        self.steps += 1
+
+        t_base = (self.steps % 256) / 255.0
+        hex_color = apply_color_pattern(t_base, next_pos[0], next_pos[1])
+        head_idx = logical_to_index(next_pos[0], next_pos[1])
+        tail_idx = logical_to_index(tail[0], tail[1])
+        self._last_patch_skip_count = False
+        return [
+            (tail_idx, "000000"),
+            (head_idx, hex_color),
+        ]
+
+    def stats_str(self):
+        return f"Worm: length={self.length}, steps={self.steps:5d}"
+
+    def _mini_explosion(self, cx, cy):
+        with config_lock:
+            palette = config.get("palette", "fire")
+            single_color = config.get("single_color", "ffffff")
+        color = palette_color(0.8, palette, single_color)
+        updates = []
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nx, ny = self._wrapped(cx + dx, cy + dy)
+                idx = logical_to_index(nx, ny)
+                updates.append((idx, color))
+        return updates
+
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
 class MultiStripOscillator:
     """Oscillating multi-strip bands that pulse with independent phases."""
     def __init__(self, log_width, log_height, band_count=8):
@@ -1243,6 +1566,14 @@ def create_sim(cfg, log_W, log_H):
         return RandomWalkSim(log_width=log_W, log_height=log_H)
     elif mode == "random_walk3":
         return RandomWalkSim3(log_width=log_W, log_height=log_H)
+    elif mode == "row_race":
+        return RowRaceSim(log_width=log_W, log_height=log_H)
+    elif mode == "random_pixel":
+        return RandomPixelSim(log_width=log_W, log_height=log_H)
+    elif mode == "worm":
+        return WormSim(log_width=log_W, log_height=log_H, length=cfg.get("worm_length", 16))
+    elif mode == "column_race":
+        return ColumnRaceSim(log_width=log_W, log_height=log_H)
     elif mode == "oscillator":
         return MultiStripOscillator(log_width=log_W, log_height=log_H)
     elif mode == "life":
@@ -1276,6 +1607,7 @@ def simulation_loop():
         last_sigma  = cfg["sigma"]
         last_lam    = cfg["lam"]
         last_rot    = cfg["rotation"]
+        last_worm_length = cfg.get("worm_length", 16)
         last_idle   = cfg.get("idle_mode", "rainbow")
 
         last_colors = ["000000"] * NLED
@@ -1296,8 +1628,9 @@ def simulation_loop():
             rot_changed    = (cfg["rotation"] != last_rot)
             idle_changed   = (cfg.get("idle_mode", "rainbow") != last_idle)
             new_mode_extra = cfg["mode"] in ("heat", "stock", "lorenz") and mode_changed
+            worm_length_changed = cfg["mode"] == "worm" and cfg.get("worm_length", 16) != last_worm_length
 
-            if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra:
+            if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra or worm_length_changed:
                 sim = create_sim(cfg, log_W, log_H)
 
                 last_mode   = cfg["mode"]
@@ -1306,6 +1639,7 @@ def simulation_loop():
                 last_sigma  = cfg["sigma"]
                 last_lam    = cfg["lam"]
                 last_rot    = cfg["rotation"]
+                last_worm_length = cfg.get("worm_length", 16)
 
                 last_colors = ["000000"] * NLED
                 changed_pixels_total = 0
@@ -1320,14 +1654,20 @@ def simulation_loop():
 
             changed_this_frame = {}
 
+            skip_frame_pixel_count = False
             if cfg["running"]:
                 for _ in range(cfg["points_per_frame"]):
                     res = sim.sample_pixel_step()
                     if res is None:
                         continue
                     updates = res if isinstance(res, list) else [res]
+                    skip_count = getattr(sim, "_last_patch_skip_count", False)
+                    if skip_count:
+                        skip_frame_pixel_count = True
                     for idx, hex_color in updates:
                         changed_this_frame[idx] = hex_color
+                    if skip_count and hasattr(sim, "_last_patch_skip_count"):
+                        sim._last_patch_skip_count = False
             else:
                 if idle_sim is not None:
                     for _ in range(cfg["points_per_frame"]):
@@ -1339,17 +1679,19 @@ def simulation_loop():
 
             if changed_this_frame:
                 patch = []
+                new_pixels = 0
                 for idx, hex_color in changed_this_frame.items():
                     if last_colors[idx] == hex_color:
                         continue
                     last_colors[idx] = hex_color
                     patch.extend([idx, 1, hex_color])
-                    if cfg["running"]:
-                        changed_pixels_total += 1
+                    new_pixels += 1
                 if patch:
                     # Debug: how many pixels are we sending?
                     # print(f"simulation_loop: sending {len(patch)//3} pixels", flush=True)
                     send_frame_batched(patch)
+                    if cfg["running"] and not skip_frame_pixel_count:
+                        changed_pixels_total += new_pixels
 
             if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
                 with config_lock:
@@ -1437,6 +1779,10 @@ def index():
             config["sigma"] = float(request.form.get("sigma", config["sigma"]))
             config["lam"] = float(request.form.get("lam", config["lam"]))
 
+            worm_length = int(request.form.get("worm_length", config.get("worm_length", 16)))
+            worm_length = max(2, worm_length)
+            worm_length = min(worm_length, PHYS_WIDTH * PHYS_HEIGHT)
+            config["worm_length"] = worm_length
             config["pixel_reset_after"] = int(request.form.get("pixel_reset_after", config["pixel_reset_after"]))
             config["pixel_pause"] = float(request.form.get("pixel_pause", config["pixel_pause"]))
 
