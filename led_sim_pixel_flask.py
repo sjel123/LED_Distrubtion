@@ -96,6 +96,8 @@ config = {
     "idle_mode": "rainbow",
 
     "running": True,
+    "snake_length": 5,
+    "snake_pause": 2.0,
 }
 
 status = {
@@ -1001,6 +1003,172 @@ class WormSim:
                 updates.append((idx, color))
         return updates
 
+
+class SnakeSim:
+    """Automated Snake '97-style game moving a growing snake toward fruit."""
+    DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    def __init__(self, log_width, log_height, length=5, pause=2.0):
+        self.W = log_width
+        self.H = log_height
+        self.length = max(2, length)
+        self.pause = max(0.0, pause)
+        self.positions = deque()
+        self.occupied = set()
+        self.direction = random.choice(self.DIRECTIONS)
+        self.fruit = None
+        self._fruit_dirty = False
+        self.steps = 0
+        self.apples = 0
+        self.pause_until = 0.0
+        self._clear_after_pause = False
+        self._last_patch_skip_count = False
+        self._start_new_game()
+
+    def _start_new_game(self):
+        self.positions.clear()
+        self.occupied.clear()
+        mid_x = self.W // 2
+        mid_y = self.H // 2
+        for offset in range(self.length):
+            x = (mid_x - offset) % max(1, self.W)
+            y = mid_y % max(1, self.H)
+            self.positions.append((x, y))
+        self.occupied.update(self.positions)
+        self.direction = random.choice(self.DIRECTIONS)
+        self.steps = 0
+        self.apples = 0
+        self._place_fruit()
+        self._clear_after_pause = False
+        self._last_patch_skip_count = False
+
+    def reset(self):
+        self._start_new_game()
+
+    def _wrapped(self, x, y):
+        return x % max(1, self.W), y % max(1, self.H)
+
+    def _place_fruit(self):
+        choices = [
+            (x, y)
+            for y in range(self.H)
+            for x in range(self.W)
+            if (x, y) not in self.occupied
+        ]
+        if not choices:
+            self.fruit = None
+            self._fruit_dirty = False
+            return
+        self.fruit = random.choice(choices)
+        self._fruit_dirty = True
+
+    def _fruit_color(self):
+        with config_lock:
+            palette = config.get("palette", "fire")
+            single_color = config.get("single_color", "ffffff")
+        return palette_color(0.95, palette, single_color)
+
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
+
+    def _manhattan_wrap(self, px, py, fx, fy):
+        dx = min((fx - px) % self.W, (px - fx) % self.W)
+        dy = min((fy - py) % self.H, (py - fy) % self.H)
+        return dx + dy
+
+    def sample_pixel_step(self):
+        now = time.time()
+        if self.pause_until:
+            if now < self.pause_until:
+                return None
+            self.pause_until = 0.0
+            if self._clear_after_pause:
+                self._clear_after_pause = False
+                self._start_new_game()
+                self._last_patch_skip_count = True
+                return self._clear_patch()
+
+        if self.W <= 0 or self.H <= 0 or not self.positions:
+            return None
+
+        head_x, head_y = self.positions[0]
+        tail = self.positions[-1]
+        neck = self.positions[1] if len(self.positions) > 1 else None
+        fx, fy = self.fruit if self.fruit else (head_x, head_y)
+
+        candidates = []
+        for dx, dy in self.DIRECTIONS:
+            if neck and (head_x + dx, head_y + dy) == neck:
+                continue
+            nx, ny = self._wrapped(head_x + dx, head_y + dy)
+            blocked = (nx, ny) in self.occupied and (nx, ny) != tail
+            dist = self._manhattan_wrap(nx, ny, fx, fy)
+            candidates.append(((dx, dy), blocked, dist))
+        candidates.sort(key=lambda item: (item[1], item[2]))
+        next_pos = None
+        for (dx, dy), blocked, _ in candidates:
+            if blocked:
+                continue
+            nx, ny = self._wrapped(head_x + dx, head_y + dy)
+            next_pos = (nx, ny)
+            self.direction = (dx, dy)
+            break
+
+        if next_pos is None:
+            explosion = self._mini_explosion(head_x, head_y)
+            self.pause_until = time.time() + self.pause
+            self._clear_after_pause = True
+            self._last_patch_skip_count = True
+            return explosion
+
+        growing = self.fruit is not None and next_pos == self.fruit
+        if not growing:
+            tail = self.positions.pop()
+            self.occupied.remove(tail)
+        else:
+            self.apples += 1
+            self._place_fruit()
+
+        self.positions.appendleft(next_pos)
+        self.occupied.add(next_pos)
+        self.steps += 1
+
+        updates = []
+        if not growing:
+            tail_idx = logical_to_index(tail[0], tail[1])
+            updates.append((tail_idx, "000000"))
+        head_idx = logical_to_index(next_pos[0], next_pos[1])
+        snake_color = apply_color_pattern((self.steps % 256) / 255.0, next_pos[0], next_pos[1])
+        updates.append((head_idx, snake_color))
+        if self._fruit_dirty and self.fruit:
+            fruit_idx = logical_to_index(self.fruit[0], self.fruit[1])
+            updates.append((fruit_idx, self._fruit_color()))
+            self._fruit_dirty = False
+
+        self._last_patch_skip_count = False
+        return updates
+
+    def stats_str(self):
+        return f"Snake '97: length={len(self.positions):4d}, apples={self.apples:3d}"
+
+    def _mini_explosion(self, cx, cy):
+        with config_lock:
+            palette = config.get("palette", "fire")
+            single_color = config.get("single_color", "ffffff")
+        color = palette_color(0.8, palette, single_color)
+        updates = []
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nx, ny = self._wrapped(cx + dx, cy + dy)
+                idx = logical_to_index(nx, ny)
+                updates.append((idx, color))
+        return updates
+
+
     def _clear_patch(self):
         return [
             (logical_to_index(x, y), "000000")
@@ -1568,6 +1736,9 @@ def create_sim(cfg, log_W, log_H):
         return RandomWalkSim3(log_width=log_W, log_height=log_H)
     elif mode == "row_race":
         return RowRaceSim(log_width=log_W, log_height=log_H)
+    elif mode == "snake":
+        return SnakeSim(log_width=log_W, log_height=log_H,
+                        length=cfg.get("snake_length", 5), pause=cfg.get("snake_pause", 2.0))
     elif mode == "random_pixel":
         return RandomPixelSim(log_width=log_W, log_height=log_H)
     elif mode == "worm":
@@ -1608,6 +1779,7 @@ def simulation_loop():
         last_lam    = cfg["lam"]
         last_rot    = cfg["rotation"]
         last_worm_length = cfg.get("worm_length", 16)
+        last_snake_length = cfg.get("snake_length", 5)
         last_idle   = cfg.get("idle_mode", "rainbow")
 
         last_colors = ["000000"] * NLED
@@ -1629,8 +1801,10 @@ def simulation_loop():
             idle_changed   = (cfg.get("idle_mode", "rainbow") != last_idle)
             new_mode_extra = cfg["mode"] in ("heat", "stock", "lorenz") and mode_changed
             worm_length_changed = cfg["mode"] == "worm" and cfg.get("worm_length", 16) != last_worm_length
+            snake_length_changed = cfg["mode"] == "snake" and cfg.get("snake_length", 5) != last_snake_length
 
-            if mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra or worm_length_changed:
+            if (mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra
+                    or worm_length_changed or snake_length_changed):
                 sim = create_sim(cfg, log_W, log_H)
 
                 last_mode   = cfg["mode"]
@@ -1640,6 +1814,7 @@ def simulation_loop():
                 last_lam    = cfg["lam"]
                 last_rot    = cfg["rotation"]
                 last_worm_length = cfg.get("worm_length", 16)
+                last_snake_length = cfg.get("snake_length", 5)
 
                 last_colors = ["000000"] * NLED
                 changed_pixels_total = 0
@@ -1690,7 +1865,7 @@ def simulation_loop():
                     # Debug: how many pixels are we sending?
                     # print(f"simulation_loop: sending {len(patch)//3} pixels", flush=True)
                     send_frame_batched(patch)
-                    if cfg["running"] and not skip_frame_pixel_count:
+                    if cfg["running"] and not skip_frame_pixel_count and cfg.get("mode") != "snake":
                         changed_pixels_total += new_pixels
 
             if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
@@ -1783,6 +1958,12 @@ def index():
             worm_length = max(2, worm_length)
             worm_length = min(worm_length, PHYS_WIDTH * PHYS_HEIGHT)
             config["worm_length"] = worm_length
+            snake_length = int(request.form.get("snake_length", config.get("snake_length", 5)))
+            snake_length = max(3, snake_length)
+            snake_length = min(snake_length, PHYS_WIDTH * PHYS_HEIGHT)
+            config["snake_length"] = snake_length
+            snake_pause = float(request.form.get("snake_pause", config.get("snake_pause", 2.0)))
+            config["snake_pause"] = max(0.0, snake_pause)
             config["pixel_reset_after"] = int(request.form.get("pixel_reset_after", config["pixel_reset_after"]))
             config["pixel_pause"] = float(request.form.get("pixel_pause", config["pixel_pause"]))
 
