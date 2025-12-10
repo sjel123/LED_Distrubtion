@@ -28,6 +28,7 @@
             <option value="random_pixel" {% if cfg.mode == 'random_pixel' %}selected{% endif %}>Random Pixel Fill</option>
             <option value="worm" {% if cfg.mode == 'worm' %}selected{% endif %}>Worm Trail</option>
             <option value="snake" {% if cfg.mode == 'snake' %}selected{% endif %}>Snake '97</option>
+            <option value="pacman" {% if cfg.mode == 'pacman' %}selected{% endif %}>Classic Pac-Man</option>
             <option value="row_race" {% if cfg.mode == 'row_race' %}selected{% endif %}>Random Row Race</option>
             <option value="column_race" {% if cfg.mode == 'column_race' %}selected{% endif %}>Random Column Race</option>
             <option value="oscillator" {% if cfg.mode == 'oscillator' %}selected{% endif %}>Multi-strip oscillator</option>
@@ -94,6 +95,9 @@
         </label>
         <label>Snake death pause (s):
           <input type="number" step="0.1" name="snake_pause" value="{{ cfg.snake_pause }}" min="0" />
+        </label>
+        <label>Pac-Man ghost count:
+          <input type="number" name="pacman_ghosts" value="{{ cfg.pacman_ghosts }}" min="1" max="4" />
         </label>
       </div>
 

@@ -98,6 +98,7 @@ config = {
     "running": True,
     "snake_length": 5,
     "snake_pause": 2.0,
+    "pacman_ghosts": 3,
 }
 
 status = {
@@ -761,6 +762,343 @@ class RowRaceSim:
             for y in range(self.H)
             for x in range(self.W)
         ]
+class PacManSim:
+    """Simple Pac-Man maze with pellets and roaming ghosts."""
+
+    DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    PACMAN_COLOR = "ffd700"
+    GHOST_COLORS = ["ff4444", "ffbbff", "44ddff", "aaff44"]
+    PELLET_COLOR = "c0d8ff"
+    WALL_COLOR = "112244"
+
+    def __init__(self, log_width, log_height, ghost_count=3):
+        self.W = log_width
+        self.H = log_height
+        self.ghost_count = max(1, min(ghost_count, len(self.GHOST_COLORS)))
+        self.walkable = []
+        self.open_cells = []
+        self._pacman_zone = []
+        self._ghost_spawns = []
+        self._pending_pellet_draw = []
+        self._pending_reset = None
+        self.level = 1
+        self.score = 0
+        self.steps = 0
+        self._last_patch_skip_count = False
+        self._build_maze()
+        self.reset()
+
+    def reset(self):
+        self._build_maze()
+        self.level = 1
+        self.score = 0
+        self.steps = 0
+        self._pending_reset = None
+        self._prepare_round(keep_level=False, keep_score=False)
+
+    def sample_pixel_step(self):
+        if self._pending_reset:
+            self._apply_pending_reset()
+        if self.pacman_pos is None or not self.open_cells:
+            return None
+
+        self.steps += 1
+        pac_prev = self.pacman_pos
+        ghost_prevs = [ghost["pos"] for ghost in self.ghosts]
+
+        self._step_pacman()
+        self._collect_pellet(self.pacman_pos)
+        self._step_ghosts()
+        ghost_news = [ghost["pos"] for ghost in self.ghosts]
+
+        collision_cell = self._detect_collision(pac_prev, ghost_prevs, ghost_news)
+        if collision_cell is not None:
+            return self._handle_death(collision_cell)
+
+        if not self.pellets:
+            return self._handle_level_complete()
+
+        updates = []
+        update_cells = {pac_prev, self.pacman_pos}
+        for prev, curr in zip(ghost_prevs, ghost_news):
+            update_cells.add(prev)
+            update_cells.add(curr)
+
+        pellet_spot = self._draw_next_pellet()
+        if pellet_spot:
+            updates.append(pellet_spot)
+
+        for x, y in update_cells:
+            if not self._is_valid_coord(x, y):
+                continue
+            updates.append((logical_to_index(x, y), self._color_for(x, y)))
+
+        return updates or None
+
+    def stats_str(self):
+        return f"Pac-Man L{self.level} score={self.score:5d} pellets={len(self.pellets):4d}"
+
+    # ---------- Internal helpers ----------
+
+    def _build_maze(self):
+        self.walkable = [[True] * self.W for _ in range(self.H)]
+        if self.W <= 0 or self.H <= 0:
+            self.open_cells = []
+            self._pacman_zone = []
+            self._ghost_spawns = []
+            return
+
+        for x in range(self.W):
+            self._set_walkable(x, 0, False)
+            self._set_walkable(x, self.H - 1, False)
+        for y in range(self.H):
+            self._set_walkable(0, y, False)
+            self._set_walkable(self.W - 1, y, False)
+
+        if self.W > 4 and self.H > 4:
+            for y in range(2, self.H - 2):
+                for x in range(2, self.W - 2):
+                    if ((x // 3) % 2 == 0 and (y % 6) not in (1, 4)) or (
+                            (y // 3) % 2 == 0 and (x % 6) not in (1, 4)):
+                        self.walkable[y][x] = False
+
+        self._carve_center_zone()
+
+        self.open_cells = [
+            (x, y)
+            for y in range(self.H)
+            for x in range(self.W)
+            if self.walkable[y][x]
+        ]
+
+        if not self.open_cells and self.W > 0 and self.H > 0:
+            cx, cy = self.W // 2, self.H // 2
+            self._set_walkable(cx, cy, True)
+            self.open_cells = [(cx, cy)]
+
+        self._define_zones()
+
+    def _carve_center_zone(self):
+        midx = self.W // 2
+        midy = self.H // 2
+        for dy in range(-2, 3):
+            for dx in range(-3, 4):
+                self._set_walkable(midx + dx, midy + dy, True)
+
+    def _set_walkable(self, x, y, value):
+        if 0 <= x < self.W and 0 <= y < self.H:
+            self.walkable[y][x] = value
+
+    def _define_zones(self):
+        if not self.open_cells:
+            self._pacman_zone = []
+            self._ghost_spawns = []
+            return
+
+        midx = self.W // 2
+        midy = self.H // 2
+        zone = []
+        for dy in (-1, 0, 1):
+            for dx in range(-2, 3):
+                pos = self._clamp(midx + dx, midy + dy)
+                if self._is_walkable(*pos):
+                    zone.append(pos)
+        if not zone:
+            zone.append(self.open_cells[0])
+        spawns = []
+        offsets = [(-2, 0), (2, 0), (0, -2), (0, 2)]
+        for dx, dy in offsets:
+            pos = self._clamp(midx + dx, midy + dy)
+            if self._is_walkable(*pos):
+                spawns.append(pos)
+        spawns = [pos for pos in spawns if pos not in zone]
+        if not spawns:
+            spawns.append(zone[0])
+
+        self._pacman_zone = list(dict.fromkeys(zone))
+        self._ghost_spawns = list(dict.fromkeys(spawns))
+
+    def _clamp(self, x, y):
+        return max(0, min(self.W - 1, x)), max(0, min(self.H - 1, y))
+
+    def _is_walkable(self, x, y):
+        return 0 <= x < self.W and 0 <= y < self.H and self.walkable[y][x]
+
+    def _is_valid_coord(self, x, y):
+        return 0 <= x < self.W and 0 <= y < self.H
+
+    def _prepare_round(self, keep_level=False, keep_score=False):
+        self.steps = 0
+        if not keep_score:
+            self.score = 0
+        if not keep_level:
+            self.level = 1
+
+        if not self.open_cells:
+            self.pacman_pos = None
+            self.ghosts = []
+            self.pellets = set()
+            self._pending_pellet_draw = []
+            return
+
+        self.pellets = set(self.open_cells)
+        self.pacman_pos = self._choose_start_pos()
+        self.pellets.discard(self.pacman_pos)
+
+        spawn_pool = self._ghost_spawns or [self.pacman_pos]
+        self.ghosts = []
+        for i in range(self.ghost_count):
+            spawn = spawn_pool[i % len(spawn_pool)]
+            self.ghosts.append({"pos": spawn, "dir": random.choice(self.DIRECTIONS)})
+            self.pellets.discard(spawn)
+
+        self._pending_pellet_draw = list(self.pellets)
+        random.shuffle(self._pending_pellet_draw)
+        self.pacman_dir = random.choice(self.DIRECTIONS)
+
+    def _choose_start_pos(self):
+        if self._pacman_zone:
+            return random.choice(self._pacman_zone)
+        return random.choice(self.open_cells)
+
+    def _step_pacman(self):
+        if self.pacman_pos is None:
+            return
+        direction = self._choose_direction(self.pacman_pos, prefer=self.pacman_dir)
+        if direction == (0, 0):
+            return
+        self.pacman_dir = direction
+        next_pos = (self.pacman_pos[0] + direction[0], self.pacman_pos[1] + direction[1])
+        if self._is_walkable(*next_pos):
+            self.pacman_pos = next_pos
+
+    def _step_ghosts(self):
+        for ghost in self.ghosts:
+            prev_pos = ghost["pos"]
+            direction = self._choose_direction(prev_pos, prefer=ghost.get("dir"))
+            if direction == (0, 0):
+                direction = random.choice(self.DIRECTIONS)
+            ghost["dir"] = direction
+            target = (prev_pos[0] + direction[0], prev_pos[1] + direction[1])
+            if not self._is_walkable(*target):
+                options = [d for d in self.DIRECTIONS if self._is_walkable(prev_pos[0] + d[0], prev_pos[1] + d[1])]
+                if options:
+                    direction = random.choice(options)
+                    ghost["dir"] = direction
+                    target = (prev_pos[0] + direction[0], prev_pos[1] + direction[1])
+                else:
+                    target = prev_pos
+            ghost["pos"] = target
+
+    def _choose_direction(self, pos, prefer=None):
+        candidates = []
+        for dx, dy in self.DIRECTIONS:
+            if self._is_walkable(pos[0] + dx, pos[1] + dy):
+                candidates.append((dx, dy))
+        if not candidates:
+            return (0, 0)
+        if prefer in candidates and random.random() < 0.7:
+            return prefer
+        if prefer:
+            opposite = (-prefer[0], -prefer[1])
+            filtered = [d for d in candidates if d != opposite]
+            if filtered:
+                return random.choice(filtered)
+        return random.choice(candidates)
+
+    def _collect_pellet(self, pos):
+        if pos in self.pellets:
+            self.pellets.remove(pos)
+            self.score += 10
+
+    def _draw_next_pellet(self):
+        attempts = len(self._pending_pellet_draw)
+        for _ in range(attempts):
+            pos = self._pending_pellet_draw.pop()
+            if pos not in self.pellets:
+                continue
+            if pos == self.pacman_pos or any(pos == ghost["pos"] for ghost in self.ghosts):
+                continue
+            return logical_to_index(pos[0], pos[1]), self.PELLET_COLOR
+        return None
+
+    def _color_for(self, x, y):
+        if self.pacman_pos == (x, y):
+            return self.PACMAN_COLOR
+        for index, ghost in enumerate(self.ghosts):
+            if ghost["pos"] == (x, y):
+                return self.GHOST_COLORS[index % len(self.GHOST_COLORS)]
+        if not self._is_walkable(x, y):
+            return self.WALL_COLOR
+        if (x, y) in self.pellets:
+            return self.PELLET_COLOR
+        return "000000"
+
+    def _detect_collision(self, pac_prev, ghost_prevs, ghost_news):
+        if pac_prev in ghost_prevs:
+            return pac_prev
+        for prev, news in zip(ghost_prevs, ghost_news):
+            if news == self.pacman_pos:
+                return self.pacman_pos
+            if news == pac_prev and prev == self.pacman_pos:
+                return pac_prev
+        return None
+
+    def _handle_death(self, center):
+        self.score = max(0, self.score - 25)
+        self._pending_reset = "death"
+        self._last_patch_skip_count = True
+        return self._death_flash(center)
+
+    def _handle_level_complete(self):
+        self.score += 50
+        self.level += 1
+        self._pending_reset = "level"
+        self._last_patch_skip_count = True
+        return self._level_flash(self.pacman_pos)
+
+    def _apply_pending_reset(self):
+        if not self._pending_reset:
+            return
+        if self._pending_reset == "death":
+            self._prepare_round(keep_level=True, keep_score=True)
+        elif self._pending_reset == "level":
+            self._prepare_round(keep_level=True, keep_score=True)
+        self._pending_reset = None
+
+    def _death_flash(self, center):
+        if center is None:
+            return []
+        updates = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if abs(dx) + abs(dy) > 2:
+                    continue
+                x, y = self._wrap(center[0] + dx, center[1] + dy)
+                if not self._is_valid_coord(x, y):
+                    continue
+                updates.append((logical_to_index(x, y), "ff2255"))
+        return updates
+
+    def _level_flash(self, center):
+        if center is None:
+            center = (self.W // 2, self.H // 2)
+        updates = []
+        for dx in range(-2, 3):
+            for dy in range(-2, 3):
+                if abs(dx) + abs(dy) > 3:
+                    continue
+                x, y = self._wrap(center[0] + dx, center[1] + dy)
+                if not self._is_valid_coord(x, y):
+                    continue
+                updates.append((logical_to_index(x, y), "59ff9f"))
+        return updates
+
+    def _wrap(self, x, y):
+        if self.W <= 0 or self.H <= 0:
+            return x, y
+        return x % self.W, y % self.H
+
 
 
 class ColumnRaceSim:
@@ -1739,6 +2077,9 @@ def create_sim(cfg, log_W, log_H):
     elif mode == "snake":
         return SnakeSim(log_width=log_W, log_height=log_H,
                         length=cfg.get("snake_length", 5), pause=cfg.get("snake_pause", 2.0))
+    elif mode == "pacman":
+        return PacManSim(log_width=log_W, log_height=log_H,
+                         ghost_count=cfg.get("pacman_ghosts", 3))
     elif mode == "random_pixel":
         return RandomPixelSim(log_width=log_W, log_height=log_H)
     elif mode == "worm":
@@ -1861,12 +2202,12 @@ def simulation_loop():
                     last_colors[idx] = hex_color
                     patch.extend([idx, 1, hex_color])
                     new_pixels += 1
-                if patch:
-                    # Debug: how many pixels are we sending?
-                    # print(f"simulation_loop: sending {len(patch)//3} pixels", flush=True)
-                    send_frame_batched(patch)
-                    if cfg["running"] and not skip_frame_pixel_count and cfg.get("mode") != "snake":
-                        changed_pixels_total += new_pixels
+                    if patch:
+                        # Debug: how many pixels are we sending?
+                        # print(f"simulation_loop: sending {len(patch)//3} pixels", flush=True)
+                        send_frame_batched(patch)
+                        if cfg["running"] and not skip_frame_pixel_count and cfg.get("mode") not in ("snake", "pacman"):
+                            changed_pixels_total += new_pixels
 
             if cfg["running"] and changed_pixels_total >= cfg["pixel_reset_after"]:
                 with config_lock:
@@ -1964,6 +2305,9 @@ def index():
             config["snake_length"] = snake_length
             snake_pause = float(request.form.get("snake_pause", config.get("snake_pause", 2.0)))
             config["snake_pause"] = max(0.0, snake_pause)
+            pacman_ghosts = int(request.form.get("pacman_ghosts", config.get("pacman_ghosts", 3)))
+            pacman_ghosts = max(1, min(4, pacman_ghosts))
+            config["pacman_ghosts"] = pacman_ghosts
             config["pixel_reset_after"] = int(request.form.get("pixel_reset_after", config["pixel_reset_after"]))
             config["pixel_pause"] = float(request.form.get("pixel_pause", config["pixel_pause"]))
 
