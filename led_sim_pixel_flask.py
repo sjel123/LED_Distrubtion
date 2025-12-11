@@ -98,6 +98,8 @@ config = {
     "running": True,
     "snake_length": 5,
     "snake_pause": 2.0,
+    "snake_wrap_edges": False,
+    "snake_block_count": 0,
     "pacman_ghosts": 3,
 }
 
@@ -746,6 +748,7 @@ class RowRaceSim:
 
         denom = max(1, self.W - 1)
         t_base = col / float(denom)
+
         hex_color = apply_color_pattern(t_base, col, row)
         idx = logical_to_index(col, row)
         self._last_patch_skip_count = False
@@ -1341,18 +1344,30 @@ class WormSim:
                 updates.append((idx, color))
         return updates
 
+    def _clear_patch(self):
+        return [
+            (logical_to_index(x, y), "000000")
+            for y in range(self.H)
+            for x in range(self.W)
+        ]
+
 
 class SnakeSim:
     """Automated Snake '97-style game moving a growing snake toward fruit."""
     DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    OBSTACLE_COLOR = "ffffff"
 
-    def __init__(self, log_width, log_height, length=5, pause=2.0):
+    def __init__(self, log_width, log_height, length=5, pause=2.0, wrap_edges=False, block_count=0):
         self.W = log_width
         self.H = log_height
         self.length = max(2, length)
         self.pause = max(0.0, pause)
+        self.wrap_edges = bool(wrap_edges)
+        self.block_count = max(0, int(block_count))
         self.positions = deque()
         self.occupied = set()
+        self.obstacles = set()
+        self._obstacles_dirty = False
         self.direction = random.choice(self.DIRECTIONS)
         self.fruit = None
         self._fruit_dirty = False
@@ -1373,6 +1388,7 @@ class SnakeSim:
             y = mid_y % max(1, self.H)
             self.positions.append((x, y))
         self.occupied.update(self.positions)
+        self._init_obstacles()
         self.direction = random.choice(self.DIRECTIONS)
         self.steps = 0
         self.apples = 0
@@ -1383,10 +1399,14 @@ class SnakeSim:
     def reset(self):
         self._start_new_game()
 
-    def _wrapped(self, x, y):
-        return x % max(1, self.W), y % max(1, self.H)
-
-    def _place_fruit(self):
+    def _init_obstacles(self):
+        self.obstacles.clear()
+        self._obstacles_dirty = False
+        if self.block_count <= 0 or self.W <= 0 or self.H <= 0:
+            return
+        max_blocks = min(self.block_count, self.W * self.H - len(self.positions))
+        if max_blocks <= 0:
+            return
         choices = [
             (x, y)
             for y in range(self.H)
@@ -1394,11 +1414,41 @@ class SnakeSim:
             if (x, y) not in self.occupied
         ]
         if not choices:
+            return
+        random.shuffle(choices)
+        self.obstacles = set(choices[:max_blocks])
+        self._obstacles_dirty = bool(self.obstacles)
+
+    def _wrapped(self, x, y):
+        if self.wrap_edges:
+            return x % max(1, self.W), y % max(1, self.H)
+        return x, y
+
+    def _in_bounds(self, x, y):
+        return 0 <= x < self.W and 0 <= y < self.H
+
+    def _place_fruit(self):
+        choices = [
+            (x, y)
+            for y in range(self.H)
+            for x in range(self.W)
+            if (x, y) not in self.occupied and (x, y) not in self.obstacles
+        ]
+        if not choices:
             self.fruit = None
             self._fruit_dirty = False
             return
         self.fruit = random.choice(choices)
         self._fruit_dirty = True
+
+    def _obstacle_updates(self):
+        if not self._obstacles_dirty or not self.obstacles:
+            return []
+        self._obstacles_dirty = False
+        return [
+            (logical_to_index(x, y), self.OBSTACLE_COLOR)
+            for (x, y) in self.obstacles
+        ]
 
     def _fruit_color(self):
         with config_lock:
@@ -1417,6 +1467,11 @@ class SnakeSim:
         dx = min((fx - px) % self.W, (px - fx) % self.W)
         dy = min((fy - py) % self.H, (py - fy) % self.H)
         return dx + dy
+
+    def _manhattan_distance(self, px, py, fx, fy):
+        if self.wrap_edges:
+            return self._manhattan_wrap(px, py, fx, fy)
+        return abs(px - fx) + abs(py - fy)
 
     def sample_pixel_step(self):
         now = time.time()
@@ -1438,20 +1493,26 @@ class SnakeSim:
         neck = self.positions[1] if len(self.positions) > 1 else None
         fx, fy = self.fruit if self.fruit else (head_x, head_y)
 
+        updates = self._obstacle_updates()
+
         candidates = []
         for dx, dy in self.DIRECTIONS:
             if neck and (head_x + dx, head_y + dy) == neck:
                 continue
-            nx, ny = self._wrapped(head_x + dx, head_y + dy)
-            blocked = (nx, ny) in self.occupied and (nx, ny) != tail
-            dist = self._manhattan_wrap(nx, ny, fx, fy)
-            candidates.append(((dx, dy), blocked, dist))
+            nx = head_x + dx
+            ny = head_y + dy
+            if not self.wrap_edges and not self._in_bounds(nx, ny):
+                continue
+            if self.wrap_edges:
+                nx, ny = self._wrapped(nx, ny)
+            blocked = ((nx, ny) in self.occupied and (nx, ny) != tail) or (nx, ny) in self.obstacles
+            dist = self._manhattan_distance(nx, ny, fx, fy)
+            candidates.append(((dx, dy), blocked, dist, nx, ny))
         candidates.sort(key=lambda item: (item[1], item[2]))
         next_pos = None
-        for (dx, dy), blocked, _ in candidates:
+        for (dx, dy), blocked, _, nx, ny in candidates:
             if blocked:
                 continue
-            nx, ny = self._wrapped(head_x + dx, head_y + dy)
             next_pos = (nx, ny)
             self.direction = (dx, dy)
             break
@@ -1461,7 +1522,7 @@ class SnakeSim:
             self.pause_until = time.time() + self.pause
             self._clear_after_pause = True
             self._last_patch_skip_count = True
-            return explosion
+            return updates + explosion
 
         growing = self.fruit is not None and next_pos == self.fruit
         if not growing:
@@ -1474,8 +1535,6 @@ class SnakeSim:
         self.positions.appendleft(next_pos)
         self.occupied.add(next_pos)
         self.steps += 1
-
-        updates = []
         if not growing:
             tail_idx = logical_to_index(tail[0], tail[1])
             updates.append((tail_idx, "000000"))
@@ -1501,7 +1560,11 @@ class SnakeSim:
         updates = []
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
-                nx, ny = self._wrapped(cx + dx, cy + dy)
+                nx = cx + dx
+                ny = cy + dy
+                if not self.wrap_edges and not self._in_bounds(nx, ny):
+                    continue
+                nx, ny = self._wrapped(nx, ny)
                 idx = logical_to_index(nx, ny)
                 updates.append((idx, color))
         return updates
@@ -2076,7 +2139,9 @@ def create_sim(cfg, log_W, log_H):
         return RowRaceSim(log_width=log_W, log_height=log_H)
     elif mode == "snake":
         return SnakeSim(log_width=log_W, log_height=log_H,
-                        length=cfg.get("snake_length", 5), pause=cfg.get("snake_pause", 2.0))
+                        length=cfg.get("snake_length", 5), pause=cfg.get("snake_pause", 2.0),
+                        wrap_edges=cfg.get("snake_wrap_edges", False),
+                        block_count=cfg.get("snake_block_count", 0))
     elif mode == "pacman":
         return PacManSim(log_width=log_W, log_height=log_H,
                          ghost_count=cfg.get("pacman_ghosts", 3))
@@ -2121,6 +2186,8 @@ def simulation_loop():
         last_rot    = cfg["rotation"]
         last_worm_length = cfg.get("worm_length", 16)
         last_snake_length = cfg.get("snake_length", 5)
+        last_snake_wrap = cfg.get("snake_wrap_edges", False)
+        last_snake_blocks = cfg.get("snake_block_count", 0)
         last_idle   = cfg.get("idle_mode", "rainbow")
 
         last_colors = ["000000"] * NLED
@@ -2143,9 +2210,11 @@ def simulation_loop():
             new_mode_extra = cfg["mode"] in ("heat", "stock", "lorenz") and mode_changed
             worm_length_changed = cfg["mode"] == "worm" and cfg.get("worm_length", 16) != last_worm_length
             snake_length_changed = cfg["mode"] == "snake" and cfg.get("snake_length", 5) != last_snake_length
+            snake_wrap_changed = cfg["mode"] == "snake" and cfg.get("snake_wrap_edges", False) != last_snake_wrap
+            snake_blocks_changed = cfg["mode"] == "snake" and cfg.get("snake_block_count", 0) != last_snake_blocks
 
             if (mode_changed or pi_changed or norm_changed or pois_changed or rot_changed or new_mode_extra
-                    or worm_length_changed or snake_length_changed):
+                    or worm_length_changed or snake_length_changed or snake_wrap_changed or snake_blocks_changed):
                 sim = create_sim(cfg, log_W, log_H)
 
                 last_mode   = cfg["mode"]
@@ -2156,6 +2225,8 @@ def simulation_loop():
                 last_rot    = cfg["rotation"]
                 last_worm_length = cfg.get("worm_length", 16)
                 last_snake_length = cfg.get("snake_length", 5)
+                last_snake_wrap = cfg.get("snake_wrap_edges", False)
+                last_snake_blocks = cfg.get("snake_block_count", 0)
 
                 last_colors = ["000000"] * NLED
                 changed_pixels_total = 0
@@ -2305,6 +2376,10 @@ def index():
             config["snake_length"] = snake_length
             snake_pause = float(request.form.get("snake_pause", config.get("snake_pause", 2.0)))
             config["snake_pause"] = max(0.0, snake_pause)
+            config["snake_wrap_edges"] = request.form.get("snake_wrap_edges") is not None
+            snake_blocks = int(request.form.get("snake_block_count", config.get("snake_block_count", 0)))
+            snake_blocks = max(0, min(PHYS_WIDTH * PHYS_HEIGHT, snake_blocks))
+            config["snake_block_count"] = snake_blocks
             pacman_ghosts = int(request.form.get("pacman_ghosts", config.get("pacman_ghosts", 3)))
             pacman_ghosts = max(1, min(4, pacman_ghosts))
             config["pacman_ghosts"] = pacman_ghosts

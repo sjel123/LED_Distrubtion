@@ -96,6 +96,14 @@
         <label>Snake death pause (s):
           <input type="number" step="0.1" name="snake_pause" value="{{ cfg.snake_pause }}" min="0" />
         </label>
+        <label>
+          <input type="checkbox" name="snake_wrap_edges" {% if cfg.snake_wrap_edges %}checked{% endif %} />
+          Allow Snake to wrap edges (include out-of-bounds moves)
+        </label>
+        <label>Snake obstacle blocks:
+          <input type="number" name="snake_block_count" value="{{ cfg.snake_block_count }}" min="0" max="1024" />
+          <small>Static white blocks for the snake to avoid.</small>
+        </label>
         <label>Pac-Man ghost count:
           <input type="number" name="pacman_ghosts" value="{{ cfg.pacman_ghosts }}" min="1" max="4" />
         </label>
