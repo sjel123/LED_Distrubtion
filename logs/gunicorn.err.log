@@ -335,3 +335,67 @@ simulation_loop: CRASHED: AttributeError("'WormSim' object has no attribute '_cl
 [2025-12-11 13:09:10 -0500] [59907] [INFO] Listening at: http://0.0.0.0:5030 (59907)
 [2025-12-11 13:09:10 -0500] [59907] [INFO] Using worker: sync
 [2025-12-11 13:09:10 -0500] [59953] [INFO] Booting worker with pid: 59953
+[2025-12-11 13:31:20 -0500] [59907] [INFO] Handling signal: term
+[2025-12-11 13:31:20 -0500] [59953] [INFO] Worker exiting (pid: 59953)
+[2025-12-11 13:31:20 -0500] [59907] [INFO] Shutting down: Master
+[2025-12-11 13:31:20 -0500] [60896] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 13:31:20 -0500] [60896] [INFO] Listening at: http://0.0.0.0:5030 (60896)
+[2025-12-11 13:31:20 -0500] [60896] [INFO] Using worker: sync
+[2025-12-11 13:31:20 -0500] [60942] [INFO] Booting worker with pid: 60942
+[2025-12-11 13:46:42 -0500] [60896] [INFO] Handling signal: term
+[2025-12-11 13:46:42 -0500] [60942] [INFO] Worker exiting (pid: 60942)
+[2025-12-11 13:46:42 -0500] [60896] [INFO] Shutting down: Master
+[2025-12-11 13:46:42 -0500] [61414] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 13:46:42 -0500] [61414] [INFO] Listening at: http://0.0.0.0:5030 (61414)
+[2025-12-11 13:46:42 -0500] [61414] [INFO] Using worker: sync
+[2025-12-11 13:46:42 -0500] [61460] [INFO] Booting worker with pid: 61460
+[2025-12-11 13:53:31 -0500] [61414] [INFO] Handling signal: term
+[2025-12-11 13:53:31 -0500] [61460] [INFO] Worker exiting (pid: 61460)
+[2025-12-11 13:53:31 -0500] [61414] [INFO] Shutting down: Master
+[2025-12-11 13:53:32 -0500] [61657] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 13:53:32 -0500] [61657] [INFO] Listening at: http://0.0.0.0:5030 (61657)
+[2025-12-11 13:53:32 -0500] [61657] [INFO] Using worker: sync
+[2025-12-11 13:53:32 -0500] [61703] [INFO] Booting worker with pid: 61703
+[2025-12-11 13:58:26 -0500] [61657] [INFO] Handling signal: term
+[2025-12-11 13:58:26 -0500] [61703] [INFO] Worker exiting (pid: 61703)
+[2025-12-11 13:58:26 -0500] [61657] [INFO] Shutting down: Master
+[2025-12-11 13:58:26 -0500] [61999] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 13:58:26 -0500] [61999] [INFO] Listening at: http://0.0.0.0:5030 (61999)
+[2025-12-11 13:58:26 -0500] [61999] [INFO] Using worker: sync
+[2025-12-11 13:58:26 -0500] [62045] [INFO] Booting worker with pid: 62045
+[2025-12-11 14:05:17 -0500] [61999] [INFO] Handling signal: term
+[2025-12-11 14:05:17 -0500] [62045] [INFO] Worker exiting (pid: 62045)
+[2025-12-11 14:05:17 -0500] [61999] [INFO] Shutting down: Master
+[2025-12-11 14:05:17 -0500] [62242] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 14:05:17 -0500] [62242] [INFO] Listening at: http://0.0.0.0:5030 (62242)
+[2025-12-11 14:05:17 -0500] [62242] [INFO] Using worker: sync
+[2025-12-11 14:05:17 -0500] [62288] [INFO] Booting worker with pid: 62288
+[2025-12-11 14:09:31 -0500] [62242] [INFO] Handling signal: term
+[2025-12-11 14:09:34 -0500] [62288] [INFO] Worker exiting (pid: 62288)
+[2025-12-11 14:09:34 -0500] [62242] [INFO] Shutting down: Master
+[2025-12-11 14:09:35 -0500] [62445] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 14:09:35 -0500] [62445] [INFO] Listening at: http://0.0.0.0:5030 (62445)
+[2025-12-11 14:09:35 -0500] [62445] [INFO] Using worker: sync
+[2025-12-11 14:09:35 -0500] [62491] [INFO] Booting worker with pid: 62491
+[2025-12-11 14:20:02 -0500] [62445] [INFO] Handling signal: term
+[2025-12-11 14:20:02 -0500] [62491] [INFO] Worker exiting (pid: 62491)
+[2025-12-11 14:20:02 -0500] [62445] [INFO] Shutting down: Master
+[2025-12-11 14:20:02 -0500] [62810] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 14:20:02 -0500] [62810] [INFO] Listening at: http://0.0.0.0:5030 (62810)
+[2025-12-11 14:20:02 -0500] [62810] [INFO] Using worker: sync
+[2025-12-11 14:20:02 -0500] [62856] [INFO] Booting worker with pid: 62856
+simulation_loop: CRASHED: AttributeError("'WormSim' object has no attribute '_recent_heads'")
+[2025-12-11 14:28:29 -0500] [62810] [INFO] Handling signal: term
+[2025-12-11 14:28:33 -0500] [62856] [INFO] Worker exiting (pid: 62856)
+[2025-12-11 14:28:33 -0500] [62810] [INFO] Shutting down: Master
+[2025-12-11 14:28:33 -0500] [63109] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 14:28:33 -0500] [63109] [INFO] Listening at: http://0.0.0.0:5030 (63109)
+[2025-12-11 14:28:33 -0500] [63109] [INFO] Using worker: sync
+[2025-12-11 14:28:33 -0500] [63155] [INFO] Booting worker with pid: 63155
+[2025-12-11 15:33:12 -0500] [63109] [INFO] Handling signal: term
+[2025-12-11 15:33:12 -0500] [63155] [INFO] Worker exiting (pid: 63155)
+[2025-12-11 15:33:12 -0500] [63109] [INFO] Shutting down: Master
+[2025-12-11 15:33:12 -0500] [64674] [INFO] Starting gunicorn 23.0.0
+[2025-12-11 15:33:12 -0500] [64674] [INFO] Listening at: http://0.0.0.0:5030 (64674)
+[2025-12-11 15:33:12 -0500] [64674] [INFO] Using worker: sync
+[2025-12-11 15:33:12 -0500] [64720] [INFO] Booting worker with pid: 64720

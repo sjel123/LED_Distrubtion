@@ -1360,10 +1360,20 @@ class SnakeSim:
     def __init__(self, log_width, log_height, length=5, pause=2.0, wrap_edges=False, block_count=0):
         self.W = log_width
         self.H = log_height
-        self.length = max(2, length)
+        area = max(1, self.W * self.H)
+        if area <= 3:
+            self.length = max(1, min(length, area))
+        else:
+            self.length = max(2, min(length, area - 2))
         self.pause = max(0.0, pause)
         self.wrap_edges = bool(wrap_edges)
-        self.block_count = max(0, int(block_count))
+        max_free = max(0, area - self.length - 1)
+        self.block_count = max(0, min(int(block_count), max_free))
+        window = max(8, min(area, max(self.length * 4, 64)))
+        self._recent_heads = deque(maxlen=window)
+        self._stuck_attempts = 0
+        self._stuck_limit = max(4, window // 3)
+        self._loop_ratio_hits = 0
         self.positions = deque()
         self.occupied = set()
         self.obstacles = set()
@@ -1395,6 +1405,9 @@ class SnakeSim:
         self._place_fruit()
         self._clear_after_pause = False
         self._last_patch_skip_count = False
+        self._recent_heads.clear()
+        if self.positions:
+            self._recent_heads.append(self.positions[0])
 
     def reset(self):
         self._start_new_game()
@@ -1404,7 +1417,7 @@ class SnakeSim:
         self._obstacles_dirty = False
         if self.block_count <= 0 or self.W <= 0 or self.H <= 0:
             return
-        max_blocks = min(self.block_count, self.W * self.H - len(self.positions))
+        max_blocks = min(self.block_count, max(0, self.W * self.H - len(self.positions) - 1))
         if max_blocks <= 0:
             return
         choices = [
@@ -1495,6 +1508,7 @@ class SnakeSim:
 
         updates = self._obstacle_updates()
 
+        recent_set = set(self._recent_heads)
         candidates = []
         for dx, dy in self.DIRECTIONS:
             if neck and (head_x + dx, head_y + dy) == neck:
@@ -1509,20 +1523,35 @@ class SnakeSim:
             dist = self._manhattan_distance(nx, ny, fx, fy)
             candidates.append(((dx, dy), blocked, dist, nx, ny))
         candidates.sort(key=lambda item: (item[1], item[2]))
-        next_pos = None
+
+        preferred = None
+        fallback = None
         for (dx, dy), blocked, _, nx, ny in candidates:
             if blocked:
                 continue
-            next_pos = (nx, ny)
-            self.direction = (dx, dy)
-            break
+            if fallback is None:
+                fallback = (dx, dy, nx, ny)
+            if (nx, ny) not in recent_set:
+                preferred = (dx, dy, nx, ny)
+                break
 
-        if next_pos is None:
-            explosion = self._mini_explosion(head_x, head_y)
-            self.pause_until = time.time() + self.pause
-            self._clear_after_pause = True
-            self._last_patch_skip_count = True
-            return updates + explosion
+        chosen = preferred or fallback
+        if not chosen:
+            return updates + self._trigger_loop_reset()
+
+        dx, dy, nx, ny = chosen
+        self.direction = (dx, dy)
+        if preferred:
+            self._stuck_attempts = 0
+        else:
+            self._stuck_attempts += 1
+            if self._stuck_attempts >= self._stuck_limit:
+                return updates + self._trigger_loop_reset()
+
+        next_pos = (nx, ny)
+        tail = self.positions[-1]
+        if next_pos in self.occupied and next_pos != tail:
+            return updates + self._trigger_loop_reset()
 
         growing = self.fruit is not None and next_pos == self.fruit
         if not growing:
@@ -1531,6 +1560,7 @@ class SnakeSim:
         else:
             self.apples += 1
             self._place_fruit()
+            self._stuck_attempts = 0
 
         self.positions.appendleft(next_pos)
         self.occupied.add(next_pos)
@@ -1547,10 +1577,41 @@ class SnakeSim:
             self._fruit_dirty = False
 
         self._last_patch_skip_count = False
+        if self._check_loop_ratio():
+            return self._trigger_loop_reset()
         return updates
 
     def stats_str(self):
         return f"Snake '97: length={len(self.positions):4d}, apples={self.apples:3d}"
+
+    def _trigger_loop_reset(self):
+        if not self.positions:
+            return []
+        head_x, head_y = self.positions[0]
+        self._recent_heads.clear()
+        self._stuck_attempts = 0
+        self._loop_ratio_hits = 0
+        explosion = self._mini_explosion(head_x, head_y)
+        self.pause_until = time.time() + self.pause
+        self._clear_after_pause = True
+        self._last_patch_skip_count = True
+        return explosion
+
+    def _check_loop_ratio(self):
+        if not self._recent_heads:
+            return False
+        if len(self._recent_heads) < self._recent_heads.maxlen:
+            self._loop_ratio_hits = max(0, self._loop_ratio_hits - 1)
+            return False
+        unique_ratio = len(set(self._recent_heads)) / float(len(self._recent_heads))
+        if unique_ratio <= 0.45:
+            self._loop_ratio_hits += 1
+            if self._loop_ratio_hits >= 3:
+                self._loop_ratio_hits = 0
+                return True
+        else:
+            self._loop_ratio_hits = max(0, self._loop_ratio_hits - 1)
+        return False
 
     def _mini_explosion(self, cx, cy):
         with config_lock:
@@ -2383,6 +2444,12 @@ def index():
             pacman_ghosts = int(request.form.get("pacman_ghosts", config.get("pacman_ghosts", 3)))
             pacman_ghosts = max(1, min(4, pacman_ghosts))
             config["pacman_ghosts"] = pacman_ghosts
+            density_str = request.form.get("minesweeper_density", config.get("minesweeper_density", 0.15))
+            try:
+                density_val = float(density_str)
+            except ValueError:
+                density_val = config.get("minesweeper_density", 0.15)
+            config["minesweeper_density"] = max(0.02, min(0.45, density_val))
             config["pixel_reset_after"] = int(request.form.get("pixel_reset_after", config["pixel_reset_after"]))
             config["pixel_pause"] = float(request.form.get("pixel_pause", config["pixel_pause"]))
 

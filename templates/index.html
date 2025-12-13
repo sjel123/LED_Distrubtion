@@ -32,6 +32,7 @@
             <option value="row_race" {% if cfg.mode == 'row_race' %}selected{% endif %}>Random Row Race</option>
             <option value="column_race" {% if cfg.mode == 'column_race' %}selected{% endif %}>Random Column Race</option>
             <option value="oscillator" {% if cfg.mode == 'oscillator' %}selected{% endif %}>Multi-strip oscillator</option>
+            <option value="minesweeper" {% if cfg.mode == 'minesweeper' %}selected{% endif %}>Minesweeper</option>
             <option value="wavefront" {% if cfg.mode == 'wavefront' %}selected{% endif %}>Wavefront pulse</option>
             <option value="brownian" {% if cfg.mode == 'brownian' %}selected{% endif %}>Brownian cloud</option>
             <option value="reaction_diffusion" {% if cfg.mode == 'reaction_diffusion' %}selected{% endif %}>Reaction-diffusion</option>
@@ -106,6 +107,10 @@
         </label>
         <label>Pac-Man ghost count:
           <input type="number" name="pacman_ghosts" value="{{ cfg.pacman_ghosts }}" min="1" max="4" />
+        </label>
+        <label>Minesweeper density:
+          <input type="number" step="0.01" name="minesweeper_density" value="{{ cfg.minesweeper_density }}" min="0.02" max="0.45" />
+          <small>Fraction of cells that are mines (0.02–0.45).</small>
         </label>
       </div>
 
