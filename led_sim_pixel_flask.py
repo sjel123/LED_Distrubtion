@@ -42,7 +42,7 @@ import argparse
 import json
 import os
 import sys
-from collections import deque
+from collections import Counter, deque
 
 from flask import Flask, request, render_template, jsonify
 
@@ -1374,6 +1374,11 @@ class SnakeSim:
         self._stuck_attempts = 0
         self._stuck_limit = max(4, window // 3)
         self._loop_ratio_hits = 0
+        state_window = max(32, min(area, window * 2))
+        self._state_history = deque(maxlen=state_window)
+        self._state_counts = Counter()
+        self._state_loop_hits = 0
+        self._state_loop_limit = 3
         self.positions = deque()
         self.occupied = set()
         self.obstacles = set()
@@ -1408,6 +1413,8 @@ class SnakeSim:
         self._recent_heads.clear()
         if self.positions:
             self._recent_heads.append(self.positions[0])
+        self._reset_state_history()
+        self._record_state_history()
 
     def reset(self):
         self._start_new_game()
@@ -1577,7 +1584,8 @@ class SnakeSim:
             self._fruit_dirty = False
 
         self._last_patch_skip_count = False
-        if self._check_loop_ratio():
+        state_looped = self._record_state_history()
+        if state_looped or self._check_loop_ratio():
             return self._trigger_loop_reset()
         return updates
 
@@ -1589,6 +1597,7 @@ class SnakeSim:
             return []
         head_x, head_y = self.positions[0]
         self._recent_heads.clear()
+        self._reset_state_history()
         self._stuck_attempts = 0
         self._loop_ratio_hits = 0
         explosion = self._mini_explosion(head_x, head_y)
@@ -1611,6 +1620,35 @@ class SnakeSim:
                 return True
         else:
             self._loop_ratio_hits = max(0, self._loop_ratio_hits - 1)
+        return False
+
+    def _reset_state_history(self):
+        self._state_history.clear()
+        self._state_counts.clear()
+        self._state_loop_hits = 0
+
+    def _state_signature(self):
+        return (tuple(self.positions), self.direction, self.fruit)
+
+    def _record_state_history(self):
+        if not self.positions:
+            return False
+        key = self._state_signature()
+        maxlen = self._state_history.maxlen
+        if maxlen and len(self._state_history) >= maxlen:
+            oldest = self._state_history.popleft()
+            self._state_counts[oldest] -= 1
+            if self._state_counts[oldest] <= 0:
+                del self._state_counts[oldest]
+        self._state_history.append(key)
+        self._state_counts[key] += 1
+        if self._state_counts[key] >= 2:
+            self._state_loop_hits += 1
+            if self._state_loop_hits >= self._state_loop_limit:
+                self._state_loop_hits = 0
+                return True
+        else:
+            self._state_loop_hits = max(0, self._state_loop_hits - 1)
         return False
 
     def _mini_explosion(self, cx, cy):
